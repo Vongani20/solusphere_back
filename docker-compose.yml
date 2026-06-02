@@ -1,25 +1,3 @@
-services:
-  db:
-    image: mysql:8.0
-    container_name: solusphere_db
-    restart: always
-    environment:
-      MYSQL_ROOT_PASSWORD: root123
-      MYSQL_DATABASE: solusphere
-      MYSQL_USER: solusphere_users
-      MYSQL_PASSWORD: Caswell1234
-    ports:
-      - "3307:3306"
-    volumes:
-      - mysql_data:/var/lib/mysql
-    networks:
-      - app-network
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
-      timeout: 20s
-      retries: 10
-      interval: 10s
-
   app:
     build: .
     container_name: solusphere_app
@@ -31,14 +9,18 @@ services:
         condition: service_healthy
     environment:
       # Enable AWS Secrets Manager
-      - USE_AWS_SECRETS_MANAGER=false
+      - USE_AWS_SECRETS_MANAGER=true
       - USE_SECRETS_AGENT=false
       
       # AWS Configuration
       - AWS_REGION=eu-west-1
       - AWS_SECRET_NAME=solusphere/prod
+      - AWS_ACCESS_KEY_ID=YOUR_ACCESS_KEY
+      - AWS_SECRET_ACCESS_KEY=YOUR_SECRET_KEY
+      # Remove or set to false
+      - AWS_EC2_METADATA_DISABLED=false
       
-      # CRITICAL: Override database host for Docker
+      # Database config (as fallback)
       - DB_HOST=db
       - DB_PORT=3306
       - DB_USER=solusphere_users
@@ -49,20 +31,8 @@ services:
       - GIN_MODE=release
       - PORT=2080
       - UPLOAD_DIR=/app/uploads
-      - AWS_SDK_LOAD_CONFIG=1
-      - AWS_EC2_METADATA_DISABLED=true
       
     volumes:
       - ./uploads:/app/uploads
-      #- C:\Users\vmaluleke\.aws:/root/.aws:rowcds
     networks:
       - app-network
-    # Add command to debug environment variables
-    command: sh -c "echo '=== Environment Variables ===' && env | grep DB_ && ./main"
-
-volumes:
-  mysql_data:
-
-networks:
-  app-network:
-    driver: bridge

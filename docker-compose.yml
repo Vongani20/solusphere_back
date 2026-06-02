@@ -31,7 +31,7 @@ services:
         condition: service_healthy
     environment:
       # Enable AWS Secrets Manager
-      - USE_AWS_SECRETS_MANAGER=true
+      - USE_AWS_SECRETS_MANAGER=false
       - USE_SECRETS_AGENT=false
       
       # AWS Configuration

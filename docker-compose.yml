@@ -54,7 +54,7 @@ services:
       
     volumes:
       - ./uploads:/app/uploads
-      #- C:\Users\vmaluleke\.aws:/root/.aws:ro
+      #- C:\Users\vmaluleke\.aws:/root/.aws:rowcds
     networks:
       - app-network
     # Add command to debug environment variables

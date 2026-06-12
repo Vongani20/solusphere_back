@@ -14,7 +14,10 @@ import (
 // UploadFile handles general file uploads (similar to UploadFace but for any file type)
 func UploadFile(db *sql.DB, file *multipart.FileHeader, userID int) (string, error) {
 	// Create uploads directory if it doesn't exist
-	uploadDir := "./uploads"
+	uploadDir := os.Getenv("UPLOAD_DIR")
+	if uploadDir == "" {
+		uploadDir = "./uploads"
+	}
 	if err := os.MkdirAll(uploadDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create upload directory: %v", err)
 	}

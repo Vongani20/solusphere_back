@@ -54,7 +54,7 @@ func CreateEvent(c *gin.Context) {
 
 	title := strings.TrimSpace(req.Title)
 	description := strings.TrimSpace(req.Description)
-	imageURL := strings.TrimSpace(req.ImageURL)
+	imageURL := normalizeEventImageURL(req.ImageURL)
 	if title == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Event title is required"})
 		return
@@ -430,6 +430,14 @@ func adminUserResponse(user *models.User) gin.H {
 		"role":          user.Role,
 		"created_at":    user.CreatedAt,
 	}
+}
+
+func normalizeEventImageURL(rawURL string) string {
+	imageURL := strings.TrimSpace(rawURL)
+	if strings.HasPrefix(imageURL, "uploads/") {
+		return "/" + imageURL
+	}
+	return imageURL
 }
 
 func requireAdmin(c *gin.Context, userID int) bool {

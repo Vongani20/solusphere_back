@@ -174,6 +174,45 @@ func ListEvents(db *sql.DB, userID int, isAdmin bool) ([]Event, error) {
 	return events, rows.Err()
 }
 
+func UpdateEvent(db *sql.DB, eventID int, title, description, imageURL, status string) (*Event, error) {
+	status = strings.TrimSpace(strings.ToLower(status))
+	if status != "" && status != "active" && status != "closed" {
+		return nil, errors.New("status must be active or closed")
+	}
+	if _, err := GetEventByID(db, eventID); err != nil {
+		return nil, err
+	}
+
+	_, err := db.Exec(`
+		UPDATE events
+		SET title = COALESCE(NULLIF(?, ''), title),
+		    description = ?,
+		    image_url = ?,
+		    status = COALESCE(NULLIF(?, ''), status),
+		    updated_at = NOW()
+		WHERE id = ?
+	`, strings.TrimSpace(title), strings.TrimSpace(description), strings.TrimSpace(imageURL), status, eventID)
+	if err != nil {
+		return nil, err
+	}
+	return GetEventByID(db, eventID)
+}
+
+func DeleteEvent(db *sql.DB, eventID int) error {
+	result, err := db.Exec("DELETE FROM events WHERE id = ?", eventID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
 func JoinEvent(db *sql.DB, eventID, userID int) error {
 	_, err := db.Exec(`
 		INSERT IGNORE INTO event_participants (event_id, user_id, joined_at)

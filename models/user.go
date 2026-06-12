@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -116,4 +117,94 @@ func UpdateUserPassword(db *sql.DB, userID int, newPassword string) error {
 
 	_, err = db.Exec("UPDATE users SET password = ? WHERE id = ?", string(hashedPassword), userID)
 	return err
+}
+
+func ListUsers(db *sql.DB) ([]User, error) {
+	rows, err := db.Query(`
+		SELECT id, username, email, COALESCE(phone_number, ''), password, COALESCE(auth_provider, 'local'), role, created_at
+		FROM users
+		ORDER BY created_at DESC, id DESC
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	users := make([]User, 0)
+	for rows.Next() {
+		var user User
+		if err := rows.Scan(&user.ID, &user.Username, &user.Email, &user.PhoneNumber, &user.Password, &user.AuthProvider, &user.Role, &user.CreatedAt); err != nil {
+			return nil, err
+		}
+		users = append(users, user)
+	}
+	return users, rows.Err()
+}
+
+func UpdateUserProfile(db *sql.DB, userID int, username, email, phoneNumber, role string) (*User, error) {
+	role = strings.TrimSpace(strings.ToLower(role))
+	if role != "" && role != RoleUser && role != RoleAdmin {
+		return nil, fmt.Errorf("role must be user or admin")
+	}
+	if _, err := GetUserByID(db, userID); err != nil {
+		return nil, err
+	}
+
+	_, err := db.Exec(`
+		UPDATE users
+		SET username = COALESCE(NULLIF(?, ''), username),
+		    email = COALESCE(NULLIF(?, ''), email),
+		    phone_number = ?,
+		    role = COALESCE(NULLIF(?, ''), role)
+		WHERE id = ?
+	`, strings.TrimSpace(username), strings.TrimSpace(strings.ToLower(email)), strings.TrimSpace(phoneNumber), role, userID)
+	if err != nil {
+		return nil, err
+	}
+	return GetUserByID(db, userID)
+}
+
+func DeleteUser(db *sql.DB, userID int) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	queries := []string{
+		"DELETE m FROM event_chat_messages m INNER JOIN events e ON e.id = m.event_id WHERE e.admin_user_id = ?",
+		"DELETE p FROM event_participants p INNER JOIN events e ON e.id = p.event_id WHERE e.admin_user_id = ?",
+		"DELETE FROM events WHERE admin_user_id = ?",
+		"DELETE FROM event_chat_messages WHERE sender_id = ?",
+		"DELETE FROM event_participants WHERE user_id = ?",
+		"DELETE FROM direct_messages WHERE sender_id = ? OR receiver_id = ?",
+		"DELETE FROM help_desk_tickets WHERE user_id = ?",
+		"DELETE FROM file_uploads WHERE user_id = ?",
+		"DELETE FROM user_faces WHERE user_id = ?",
+		"DELETE FROM password_reset_codes WHERE user_id = ?",
+	}
+	for _, query := range queries {
+		if strings.Contains(query, " OR receiver_id") {
+			if _, err := tx.Exec(query, userID, userID); err != nil {
+				return err
+			}
+			continue
+		}
+		if _, err := tx.Exec(query, userID); err != nil {
+			return err
+		}
+	}
+
+	result, err := tx.Exec("DELETE FROM users WHERE id = ?", userID)
+	if err != nil {
+		return err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return sql.ErrNoRows
+	}
+	return tx.Commit()
 }

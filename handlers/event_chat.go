@@ -27,12 +27,27 @@ type updateUserRoleRequest struct {
 	Role string `json:"role" binding:"required"`
 }
 
+type updateUserRequest struct {
+	Username    *string `json:"username"`
+	Email       *string `json:"email"`
+	PhoneNumber *string `json:"phone_number"`
+	Role        *string `json:"role"`
+	Password    *string `json:"password"`
+}
+
 type adminCreateUserRequest struct {
 	Username    string `json:"username" binding:"required"`
 	Email       string `json:"email" binding:"required,email"`
 	PhoneNumber string `json:"phone_number"`
 	Password    string `json:"password" binding:"required,min=6"`
 	Role        string `json:"role"`
+}
+
+type updateEventRequest struct {
+	Title       *string `json:"title"`
+	Description *string `json:"description"`
+	ImageURL    *string `json:"image_url"`
+	Status      *string `json:"status"`
 }
 
 func CreateEvent(c *gin.Context) {
@@ -294,6 +309,146 @@ func UpdateUserRole(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "User role updated", "user": adminUserResponse(updatedUser)})
 }
 
+func ListUsersByAdmin(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	if !requireAdmin(c, userID) {
+		return
+	}
+
+	users, err := models.ListUsers(database.DB)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load users"})
+		return
+	}
+
+	response := make([]gin.H, 0, len(users))
+	for i := range users {
+		response = append(response, adminUserResponse(&users[i]))
+	}
+	c.JSON(http.StatusOK, gin.H{"users": response})
+}
+
+func GetUserByAdmin(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	if !requireAdmin(c, userID) {
+		return
+	}
+
+	targetUserID, ok := parseUserIDParam(c)
+	if !ok {
+		return
+	}
+	user, err := models.GetUserByID(database.DB, targetUserID)
+	if err != nil || user == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"user": adminUserResponse(user)})
+}
+
+func UpdateUserByAdmin(c *gin.Context) {
+	adminID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	if !requireAdmin(c, adminID) {
+		return
+	}
+
+	targetUserID, ok := parseUserIDParam(c)
+	if !ok {
+		return
+	}
+
+	var req updateUserRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+	existingUser, err := models.GetUserByID(database.DB, targetUserID)
+	if err != nil || existingUser == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+
+	username := existingUser.Username
+	email := existingUser.Email
+	phoneNumber := existingUser.PhoneNumber
+	role := existingUser.Role
+	if req.Username != nil {
+		username = *req.Username
+	}
+	if req.Email != nil {
+		email = *req.Email
+	}
+	if req.PhoneNumber != nil {
+		phoneNumber = *req.PhoneNumber
+	}
+	if req.Role != nil {
+		role = strings.TrimSpace(strings.ToLower(*req.Role))
+	}
+	if targetUserID == adminID && role != "" && role != models.RoleAdmin {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Admins cannot remove their own admin role"})
+		return
+	}
+
+	user, err := models.UpdateUserProfile(database.DB, targetUserID, username, email, phoneNumber, role)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.Password != nil && strings.TrimSpace(*req.Password) != "" {
+		if err := models.UpdateUserPassword(database.DB, targetUserID, *req.Password); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update password"})
+			return
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "User updated", "user": adminUserResponse(user)})
+}
+
+func DeleteUserByAdmin(c *gin.Context) {
+	adminID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	if !requireAdmin(c, adminID) {
+		return
+	}
+
+	targetUserID, ok := parseUserIDParam(c)
+	if !ok {
+		return
+	}
+	if targetUserID == adminID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Admins cannot delete their own account"})
+		return
+	}
+	if err := models.DeleteUser(database.DB, targetUserID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete user"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "User deleted", "user_id": targetUserID})
+}
+
 func CreateUserByAdmin(c *gin.Context) {
 	userID, ok := currentUserID(c)
 	if !ok {
@@ -389,6 +544,87 @@ func CreateUserByAdmin(c *gin.Context) {
 	})
 }
 
+func UpdateEventByAdmin(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	if !requireAdmin(c, userID) {
+		return
+	}
+	eventID, ok := parseEventID(c)
+	if !ok {
+		return
+	}
+	var req updateEventRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+	existingEvent, err := models.GetEventByID(database.DB, eventID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load event"})
+		return
+	}
+
+	title := existingEvent.Title
+	description := existingEvent.Description
+	imageURL := existingEvent.ImageURL
+	status := existingEvent.Status
+	if req.Title != nil {
+		title = *req.Title
+	}
+	if req.Description != nil {
+		description = *req.Description
+	}
+	if req.ImageURL != nil {
+		imageURL = normalizeEventImageURL(*req.ImageURL)
+	}
+	if req.Status != nil {
+		status = *req.Status
+	}
+
+	event, err := models.UpdateEvent(database.DB, eventID, title, description, imageURL, status)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Event updated", "event": event})
+}
+
+func DeleteEventByAdmin(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	if !requireAdmin(c, userID) {
+		return
+	}
+	eventID, ok := parseEventID(c)
+	if !ok {
+		return
+	}
+	if err := models.DeleteEvent(database.DB, eventID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Event not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete event"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Event deleted", "event_id": eventID})
+}
+
 func BootstrapAdmin(c *gin.Context) {
 	userID, ok := currentUserID(c)
 	if !ok {
@@ -465,4 +701,13 @@ func parseEventID(c *gin.Context) (int, bool) {
 		return 0, false
 	}
 	return eventID, true
+}
+
+func parseUserIDParam(c *gin.Context) (int, bool) {
+	userID, err := strconv.Atoi(c.Param("user_id"))
+	if err != nil || userID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return 0, false
+	}
+	return userID, true
 }

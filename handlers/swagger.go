@@ -549,6 +549,18 @@ const openAPISpecJSON = `{
       }
     },
     "/api/admin/users": {
+      "get": {
+        "tags": ["Admin"],
+        "summary": "List all users as an admin",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      },
       "post": {
         "tags": ["Admin"],
         "summary": "Create a user as an admin",
@@ -579,6 +591,64 @@ const openAPISpecJSON = `{
         }
       }
     },
+    "/api/admin/users/{user_id}": {
+      "get": {
+        "tags": ["Admin"],
+        "summary": "Get a user as an admin",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/UserID" }],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "patch": {
+        "tags": ["Admin"],
+        "summary": "Update a user as an admin",
+        "description": "Partial update. Send only the fields that should change. Role updates return the full user object instead of only an ID.",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/UserID" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AdminUpdateUserRequest" },
+              "example": {
+                "username": "updated.user",
+                "email": "updated.user@example.com",
+                "phone_number": "+15551234567",
+                "role": "admin"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "delete": {
+        "tags": ["Admin"],
+        "summary": "Delete a user as an admin",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/UserID" }],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
     "/api/admin/events": {
       "post": {
         "tags": ["Admin"],
@@ -603,6 +673,50 @@ const openAPISpecJSON = `{
           "401": { "$ref": "#/components/responses/Error" },
           "403": { "$ref": "#/components/responses/Error" },
           "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/admin/events/{event_id}": {
+      "patch": {
+        "tags": ["Admin"],
+        "summary": "Update an event as an admin",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/EventID" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/EventUpdateRequest" },
+              "example": {
+                "title": "Updated briefing",
+                "description": "Updated operations update",
+                "image_url": "https://example.com/event-image.jpg",
+                "status": "active"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "delete": {
+        "tags": ["Admin"],
+        "summary": "Delete an event as an admin",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/EventID" }],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "404": { "$ref": "#/components/responses/Error" },
           "500": { "$ref": "#/components/responses/Error" }
         }
       }
@@ -676,6 +790,76 @@ const openAPISpecJSON = `{
           "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
           "404": { "$ref": "#/components/responses/Error" },
           "409": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/admin/helpdesk": {
+      "get": {
+        "tags": ["Admin", "Helpdesk"],
+        "summary": "List helpdesk tickets as an admin",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/admin/helpdesk/{ticket_id}": {
+      "get": {
+        "tags": ["Admin", "Helpdesk"],
+        "summary": "Get a helpdesk ticket as an admin",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/TicketID" }],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "patch": {
+        "tags": ["Admin", "Helpdesk"],
+        "summary": "Update a helpdesk ticket as an admin",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/TicketID" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/HelpdeskUpdateRequest" },
+              "example": {
+                "subject": "Login issue",
+                "description": "Customer cannot access the app.",
+                "status": "in_progress"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "delete": {
+        "tags": ["Admin", "Helpdesk"],
+        "summary": "Delete a helpdesk ticket as an admin",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/TicketID" }],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "500": { "$ref": "#/components/responses/Error" }
         }
       }
     },
@@ -934,6 +1118,12 @@ const openAPISpecJSON = `{
         "required": true,
         "schema": { "type": "integer", "minimum": 1 }
       },
+      "TicketID": {
+        "name": "ticket_id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "integer", "minimum": 1 }
+      },
       "AnalysisID": {
         "name": "id",
         "in": "path",
@@ -1068,6 +1258,14 @@ const openAPISpecJSON = `{
           "description": { "type": "string" }
         }
       },
+      "HelpdeskUpdateRequest": {
+        "type": "object",
+        "properties": {
+          "subject": { "type": "string" },
+          "description": { "type": "string" },
+          "status": { "type": "string", "enum": ["open", "in_progress", "resolved", "closed"] }
+        }
+      },
       "HelpdeskChatRequest": {
         "type": "object",
         "required": ["userMessage"],
@@ -1084,6 +1282,15 @@ const openAPISpecJSON = `{
           "image_url": { "type": "string", "format": "uri", "description": "Image displayed above comments in the event feed." }
         }
       },
+      "EventUpdateRequest": {
+        "type": "object",
+        "properties": {
+          "title": { "type": "string", "maxLength": 255 },
+          "description": { "type": "string" },
+          "image_url": { "type": "string", "format": "uri" },
+          "status": { "type": "string", "enum": ["active", "closed"] }
+        }
+      },
       "AdminCreateUserRequest": {
         "type": "object",
         "required": ["username", "email", "password"],
@@ -1093,6 +1300,16 @@ const openAPISpecJSON = `{
           "phone_number": { "type": "string" },
           "password": { "type": "string", "minLength": 6 },
           "role": { "type": "string", "enum": ["user", "admin"], "default": "user" }
+        }
+      },
+      "AdminUpdateUserRequest": {
+        "type": "object",
+        "properties": {
+          "username": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "phone_number": { "type": "string" },
+          "password": { "type": "string", "minLength": 6 },
+          "role": { "type": "string", "enum": ["user", "admin"] }
         }
       },
       "EventMessageRequest": {

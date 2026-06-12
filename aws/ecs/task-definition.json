@@ -1,0 +1,49 @@
+{
+  "family": "solusphere-backend",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::<account-id>:role/solusphere-ecs-execution-role",
+  "taskRoleArn": "arn:aws:iam::<account-id>:role/solusphere-ecs-task-role",
+  "containerDefinitions": [
+    {
+      "name": "solusphere-backend",
+      "image": "<account-id>.dkr.ecr.<region>.amazonaws.com/solusphere-backend:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 2080,
+          "hostPort": 2080,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        { "name": "GIN_MODE", "value": "release" },
+        { "name": "PORT", "value": "2080" },
+        { "name": "USE_AWS_SECRETS_MANAGER", "value": "true" },
+        { "name": "AWS_SECRET_NAME", "value": "solusphere/prod" },
+        { "name": "AWS_REGION", "value": "<region>" },
+        { "name": "AWS_BUCKET_NAME", "value": "<s3-bucket-name>" },
+        { "name": "OPENAI_MODEL", "value": "gpt-4.1-mini" },
+        { "name": "UPLOAD_DIR", "value": "/tmp/uploads" }
+      ],
+      "secrets": [],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/solusphere-backend",
+          "awslogs-region": "<region>",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "wget -qO- http://localhost:2080/health || exit 1"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}

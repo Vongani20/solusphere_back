@@ -21,11 +21,17 @@ type AppSecrets struct {
 	DBUser        string `json:"DB_USER"`
 	DBPassword    string `json:"DB_PASSWORD"`
 	DBHost        string `json:"DB_HOST"`
+	DBPort        string `json:"DB_PORT"`
 	DBName        string `json:"DB_NAME"`
 	AWSAccessKey  string `json:"AWS_ACCESS_KEY_ID"`
 	AWSSecretKey  string `json:"AWS_SECRET_ACCESS_KEY"`
 	AWSRegion     string `json:"AWS_REGION"`
 	AWSBucketName string `json:"AWS_BUCKET_NAME"`
+	SMTPHost      string `json:"SMTP_HOST"`
+	SMTPPort      string `json:"SMTP_PORT"`
+	SMTPUsername  string `json:"SMTP_USERNAME"`
+	SMTPPassword  string `json:"SMTP_PASSWORD"`
+	SMTPFrom      string `json:"SMTP_FROM"`
 }
 
 var (

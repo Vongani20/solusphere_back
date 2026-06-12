@@ -31,6 +31,11 @@ type AppSecrets struct {
 	AWSSecretKey  string
 	AWSRegion     string
 	AWSBucketName string
+	SMTPHost      string
+	SMTPPort      string
+	SMTPUsername  string
+	SMTPPassword  string
+	SMTPFrom      string
 }
 
 func main() {
@@ -71,6 +76,11 @@ func main() {
 			OpenAIModel:   getStringValue(secretData, "OPENAI_MODEL", "gpt-4.1-mini"),
 			AWSRegion:     getStringValue(secretData, "AWS_REGION", "eu-west-1"),
 			AWSBucketName: getStringValue(secretData, "AWS_BUCKET_NAME", "innovationform"),
+			SMTPHost:      getStringValue(secretData, "SMTP_HOST", ""),
+			SMTPPort:      getStringValue(secretData, "SMTP_PORT", ""),
+			SMTPUsername:  getStringValue(secretData, "SMTP_USERNAME", ""),
+			SMTPPassword:  getStringValue(secretData, "SMTP_PASSWORD", ""),
+			SMTPFrom:      getStringValue(secretData, "SMTP_FROM", ""),
 		}
 		log.Println(" Successfully retrieved secrets from Secrets Manager Agent")
 
@@ -110,12 +120,17 @@ func main() {
 			DBUser:        appSecretsRaw.DBUser,
 			DBPassword:    appSecretsRaw.DBPassword,
 			DBHost:        appSecretsRaw.DBHost,
-			DBPort:        "3306",
+			DBPort:        getDefault(appSecretsRaw.DBPort, "3306"),
 			DBName:        appSecretsRaw.DBName,
 			AWSAccessKey:  appSecretsRaw.AWSAccessKey,
 			AWSSecretKey:  appSecretsRaw.AWSSecretKey,
 			AWSRegion:     appSecretsRaw.AWSRegion,
 			AWSBucketName: appSecretsRaw.AWSBucketName,
+			SMTPHost:      appSecretsRaw.SMTPHost,
+			SMTPPort:      appSecretsRaw.SMTPPort,
+			SMTPUsername:  appSecretsRaw.SMTPUsername,
+			SMTPPassword:  appSecretsRaw.SMTPPassword,
+			SMTPFrom:      appSecretsRaw.SMTPFrom,
 		}
 
 		// Override DB_HOST from environment variable if provided (for Docker)
@@ -156,6 +171,11 @@ func main() {
 			AWSBucketName: getEnv("AWS_BUCKET_NAME", "innovationform"),
 			AWSAccessKey:  getEnv("AWS_ACCESS_KEY_ID", ""),
 			AWSSecretKey:  getEnv("AWS_SECRET_ACCESS_KEY", ""),
+			SMTPHost:      getEnv("SMTP_HOST", ""),
+			SMTPPort:      getEnv("SMTP_PORT", ""),
+			SMTPUsername:  getEnv("SMTP_USERNAME", ""),
+			SMTPPassword:  getEnv("SMTP_PASSWORD", ""),
+			SMTPFrom:      getEnv("SMTP_FROM", ""),
 		}
 	}
 
@@ -190,18 +210,25 @@ func main() {
 	os.Setenv("DB_USER", appSecrets.DBUser)
 	os.Setenv("DB_PASSWORD", appSecrets.DBPassword)
 	os.Setenv("DB_HOST", appSecrets.DBHost)
+	os.Setenv("DB_PORT", appSecrets.DBPort)
 	os.Setenv("DB_NAME", appSecrets.DBName)
 	os.Setenv("AWS_REGION", appSecrets.AWSRegion)
 	os.Setenv("AWS_BUCKET_NAME", appSecrets.AWSBucketName)
 	os.Setenv("AWS_ACCESS_KEY_ID", appSecrets.AWSAccessKey)
 	os.Setenv("AWS_SECRET_ACCESS_KEY", appSecrets.AWSSecretKey)
+	os.Setenv("SMTP_HOST", appSecrets.SMTPHost)
+	os.Setenv("SMTP_PORT", appSecrets.SMTPPort)
+	os.Setenv("SMTP_USERNAME", appSecrets.SMTPUsername)
+	os.Setenv("SMTP_PASSWORD", appSecrets.SMTPPassword)
+	os.Setenv("SMTP_FROM", appSecrets.SMTPFrom)
 
 	// Initialize MySQL database
 	log.Printf(" Connecting to MySQL database at %s:%s", appSecrets.DBHost, appSecrets.DBPort)
-	database.InitDBWithSecrets(
+	database.InitDBWithPort(
 		appSecrets.DBUser,
 		appSecrets.DBPassword,
 		appSecrets.DBHost,
+		appSecrets.DBPort,
 		appSecrets.DBName,
 	)
 
@@ -224,10 +251,11 @@ func main() {
 	if err := database.DB.Ping(); err != nil {
 		log.Printf(" Database connection lost after migrations: %v", err)
 		log.Println(" Reconnecting to database...")
-		database.InitDBWithSecrets(
+		database.InitDBWithPort(
 			appSecrets.DBUser,
 			appSecrets.DBPassword,
 			appSecrets.DBHost,
+			appSecrets.DBPort,
 			appSecrets.DBName,
 		)
 		if err := database.DB.Ping(); err != nil {
@@ -241,8 +269,9 @@ func main() {
 	// Log connection status
 	log.Printf(" Final DB status: %s", database.GetDBStatus())
 
-	// Initialize AWS services if credentials are provided
-	if appSecrets.AWSAccessKey != "" && appSecrets.AWSSecretKey != "" {
+	// Initialize AWS services. In development this can use explicit keys from
+	// .env; on ECS it should use the task role through the AWS default chain.
+	if appSecrets.AWSRegion != "" && appSecrets.AWSBucketName != "" {
 		log.Println(" Initializing AWS services...")
 		if err := models.InitAWSWithSecrets(
 			appSecrets.AWSAccessKey,
@@ -252,15 +281,15 @@ func main() {
 		); err != nil {
 			log.Printf(" Warning: Failed to initialize AWS clients: %v", err)
 		} else {
-			log.Println(" AWS S3 and Rekognition clients initialized successfully")
+			log.Println(" AWS S3, SNS, and Rekognition clients initialized successfully")
 		}
 	} else {
-		log.Println(" AWS credentials not provided, skipping AWS services initialization")
+		log.Println(" AWS region or bucket not provided, skipping AWS services initialization")
 	}
 
-	// Initialize Rekognition service when credentials are available.
+	// Initialize Rekognition service when AWS region and bucket are available.
 	var rekogSvc *services.RekognitionService
-	if appSecrets.AWSAccessKey != "" && appSecrets.AWSSecretKey != "" {
+	if appSecrets.AWSRegion != "" && appSecrets.AWSBucketName != "" {
 		log.Println(" Initializing Rekognition service...")
 		rekogSvc = services.NewRekognitionServiceWithCredentials(
 			appSecrets.AWSAccessKey,
@@ -269,7 +298,7 @@ func main() {
 			appSecrets.AWSBucketName,
 		)
 	} else {
-		log.Println(" Rekognition credentials not provided; face recognition endpoints will return 503")
+		log.Println(" Rekognition region or bucket not provided; face recognition endpoints will return 503")
 	}
 
 	// Initialize OpenAI service
@@ -447,7 +476,7 @@ func main() {
 		}
 
 		awsStatus := "not_configured"
-		if appSecrets.AWSAccessKey != "" && appSecrets.AWSSecretKey != "" {
+		if appSecrets.AWSRegion != "" && appSecrets.AWSBucketName != "" {
 			awsStatus = "configured"
 		}
 		openAIStatus := "not_configured"
@@ -525,6 +554,13 @@ func main() {
 // Helper function to get environment variable with default value
 func getEnv(key, defaultValue string) string {
 	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+func getDefault(value, defaultValue string) string {
+	if value != "" {
 		return value
 	}
 	return defaultValue

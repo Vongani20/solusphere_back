@@ -36,38 +36,39 @@ func NewRekognitionService() *RekognitionService {
 	)
 }
 
-// NewRekognitionServiceWithCredentials creates a new Rekognition service with provided credentials
+// NewRekognitionServiceWithCredentials creates a Rekognition service. If access
+// keys are empty, the AWS SDK default credential chain is used, which is the
+// expected production path on ECS with a task role.
 func NewRekognitionServiceWithCredentials(accessKey, secretKey, region, bucket string) *RekognitionService {
 	if bucket == "" {
-		log.Fatal("❌ AWS_BUCKET_NAME is not set")
+		log.Fatal("AWS_BUCKET_NAME is not set")
 	}
 	if region == "" {
-		log.Fatal("❌ AWS_REGION is not set")
-	}
-	if accessKey == "" || secretKey == "" {
-		log.Fatal("❌ AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are required")
+		log.Fatal("AWS_REGION is not set")
 	}
 
-	log.Println("🔧 Initializing Rekognition service with provided credentials")
-	log.Printf("📊 Region: %s, Bucket: %s", region, bucket)
+	log.Println("Initializing Rekognition service")
+	log.Printf("Region: %s, Bucket: %s", region, bucket)
 
-	// Create static credentials provider
-	credProvider := credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")
-
-	// Load AWS Configuration with explicit credentials
-	cfg, err := config.LoadDefaultConfig(context.TODO(),
+	opts := []func(*config.LoadOptions) error{
 		config.WithRegion(region),
-		config.WithCredentialsProvider(credProvider),
-	)
-	if err != nil {
-		log.Fatalf("❌ Failed to load AWS config: %v", err)
+	}
+	if accessKey != "" && secretKey != "" {
+		opts = append(opts, config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(accessKey, secretKey, "")))
+		log.Println("Rekognition using explicit AWS credentials")
+	} else {
+		log.Println("Rekognition using AWS default credential chain")
 	}
 
-	// Create Rekognition Client
+	cfg, err := config.LoadDefaultConfig(context.TODO(), opts...)
+	if err != nil {
+		log.Fatalf("Failed to load AWS config: %v", err)
+	}
+
 	client := rekognition.NewFromConfig(cfg)
 
-	log.Printf("✅ Rekognition service initialized successfully")
-	log.Printf("✅ Client ready for region: %s", cfg.Region)
+	log.Printf("Rekognition service initialized successfully")
+	log.Printf("Client ready for region: %s", cfg.Region)
 
 	return &RekognitionService{
 		Client:    client,

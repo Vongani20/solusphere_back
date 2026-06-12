@@ -17,21 +17,30 @@ func InitDB() {
 	dbUser := os.Getenv("DB_USER")
 	dbPassword := os.Getenv("DB_PASSWORD")
 	dbHost := os.Getenv("DB_HOST")
+	dbPort := os.Getenv("DB_PORT")
 	dbName := os.Getenv("DB_NAME")
 
-	InitDBWithSecrets(dbUser, dbPassword, dbHost, dbName)
+	InitDBWithPort(dbUser, dbPassword, dbHost, dbPort, dbName)
 }
 
 // InitDBWithSecrets initializes database with provided credentials
 func InitDBWithSecrets(dbUser, dbPassword, dbHost, dbName string) {
+	InitDBWithPort(dbUser, dbPassword, dbHost, "3306", dbName)
+}
+
+// InitDBWithPort initializes database with provided credentials and port.
+func InitDBWithPort(dbUser, dbPassword, dbHost, dbPort, dbName string) {
 	log.Println(" InitDBWithSecrets called")
-	log.Printf("   Parameters: dbUser=%s, dbHost=%s, dbName=%s", dbUser, dbHost, dbName)
+	if dbPort == "" {
+		dbPort = "3306"
+	}
+	log.Printf("   Parameters: dbUser=%s, dbHost=%s, dbPort=%s, dbName=%s", dbUser, dbHost, dbPort, dbName)
 
 	var err error
 
 	// MySQL connection string format
-	dsn := fmt.Sprintf("%s:%s@tcp(%s:3306)/%s?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci",
-		dbUser, dbPassword, dbHost, dbName)
+	dsn := fmt.Sprintf("%s:%s@tcp(%s:%s)/%s?parseTime=true&charset=utf8mb4&collation=utf8mb4_unicode_ci",
+		dbUser, dbPassword, dbHost, dbPort, dbName)
 
 	DB, err = sql.Open("mysql", dsn)
 	if err != nil {
@@ -49,7 +58,7 @@ func InitDBWithSecrets(dbUser, dbPassword, dbHost, dbName string) {
 	}
 
 	log.Println(" Connected to MySQL database successfully!")
-	log.Printf(" Database: %s@%s/%s", dbUser, dbHost, dbName)
+	log.Printf(" Database: %s@%s:%s/%s", dbUser, dbHost, dbPort, dbName)
 
 	// Log the memory address of DB for debugging
 	log.Printf(" DB memory address: %p", DB)
@@ -83,8 +92,9 @@ func EnsureDB() error {
 		dbUser := os.Getenv("DB_USER")
 		dbPassword := os.Getenv("DB_PASSWORD")
 		dbHost := os.Getenv("DB_HOST")
+		dbPort := os.Getenv("DB_PORT")
 		dbName := os.Getenv("DB_NAME")
-		InitDBWithSecrets(dbUser, dbPassword, dbHost, dbName)
+		InitDBWithPort(dbUser, dbPassword, dbHost, dbPort, dbName)
 		return nil
 	}
 
@@ -93,8 +103,9 @@ func EnsureDB() error {
 		dbUser := os.Getenv("DB_USER")
 		dbPassword := os.Getenv("DB_PASSWORD")
 		dbHost := os.Getenv("DB_HOST")
+		dbPort := os.Getenv("DB_PORT")
 		dbName := os.Getenv("DB_NAME")
-		InitDBWithSecrets(dbUser, dbPassword, dbHost, dbName)
+		InitDBWithPort(dbUser, dbPassword, dbHost, dbPort, dbName)
 		return err
 	}
 

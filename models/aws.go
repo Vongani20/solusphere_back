@@ -5,19 +5,24 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/url"
 	"os"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/rekognition"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/sns"
 )
 
 var (
-	S3Client         *s3.Client
+	S3Client          *s3.Client
 	RekognitionClient *rekognition.Client
-	BucketName       string
+	SNSClient         *sns.Client
+	BucketName        string
+	AWSRegionName     string
 )
 
 // InitAWS initializes AWS using environment variables (backward compatibility)
@@ -26,7 +31,7 @@ func InitAWS() error {
 	secretKey := os.Getenv("AWS_SECRET_ACCESS_KEY")
 	region := os.Getenv("AWS_REGION")
 	bucketName := os.Getenv("AWS_BUCKET_NAME")
-	
+
 	return InitAWSWithSecrets(accessKey, secretKey, region, bucketName)
 }
 
@@ -53,13 +58,36 @@ func InitAWSWithSecrets(accessKey, secretKey, region, bucketName string) error {
 
 	// Initialize S3 client
 	S3Client = s3.NewFromConfig(cfg)
-	
+
 	// Initialize Rekognition client
 	RekognitionClient = rekognition.NewFromConfig(cfg)
-	
+
+	// Initialize SNS client for password-reset SMS messages
+	SNSClient = sns.NewFromConfig(cfg)
+
 	BucketName = bucketName
+	AWSRegionName = region
 
 	log.Printf("✅ AWS clients initialized for region: %s, bucket: %s", region, bucketName)
+	return nil
+}
+
+func PublishSMS(phoneNumber, message string) error {
+	if SNSClient == nil {
+		return fmt.Errorf("SNS client not initialized")
+	}
+	if strings.TrimSpace(phoneNumber) == "" {
+		return fmt.Errorf("phone number is required")
+	}
+
+	_, err := SNSClient.Publish(context.Background(), &sns.PublishInput{
+		PhoneNumber: aws.String(phoneNumber),
+		Message:     aws.String(message),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to publish SMS with SNS: %w", err)
+	}
+
 	return nil
 }
 
@@ -89,20 +117,94 @@ func GetBucketName() string {
 
 // UploadToS3 uploads a file to S3 (fixed version)
 func UploadToS3(key string, body []byte) error {
+	return UploadToS3WithContentType(key, body, "")
+}
+
+func UploadToS3WithContentType(key string, body []byte, contentType string) error {
 	if S3Client == nil {
 		return fmt.Errorf("S3 client not initialized")
 	}
+	if BucketName == "" {
+		return fmt.Errorf("S3 bucket name is not configured")
+	}
 
-	// Convert []byte to io.Reader using bytes.NewReader
-	_, err := S3Client.PutObject(context.Background(), &s3.PutObjectInput{
+	input := &s3.PutObjectInput{
 		Bucket: aws.String(BucketName),
 		Key:    aws.String(key),
-		Body:   bytes.NewReader(body), // FIXED: Convert []byte to io.Reader
-	})
-	
+		Body:   bytes.NewReader(body),
+	}
+	if contentType != "" {
+		input.ContentType = aws.String(contentType)
+	}
+
+	_, err := S3Client.PutObject(context.Background(), input)
 	if err != nil {
 		return fmt.Errorf("failed to upload to S3: %w", err)
 	}
-	
+
 	return nil
+}
+
+func DeleteFromS3(key string) error {
+	if S3Client == nil {
+		return fmt.Errorf("S3 client not initialized")
+	}
+	if BucketName == "" {
+		return fmt.Errorf("S3 bucket name is not configured")
+	}
+	if strings.TrimSpace(key) == "" {
+		return nil
+	}
+
+	_, err := S3Client.DeleteObject(context.Background(), &s3.DeleteObjectInput{
+		Bucket: aws.String(BucketName),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to delete from S3: %w", err)
+	}
+
+	return nil
+}
+
+func S3ObjectURL(key string) string {
+	escapedKey := escapeS3Key(key)
+	if AWSRegionName == "" {
+		return fmt.Sprintf("https://%s.s3.amazonaws.com/%s", BucketName, escapedKey)
+	}
+
+	return fmt.Sprintf("https://%s.s3.%s.amazonaws.com/%s", BucketName, AWSRegionName, escapedKey)
+}
+
+func S3KeyFromObjectURL(rawURL string) (string, bool) {
+	if strings.HasPrefix(rawURL, "s3://") {
+		withoutScheme := strings.TrimPrefix(rawURL, "s3://")
+		parts := strings.SplitN(withoutScheme, "/", 2)
+		if len(parts) == 2 && parts[0] == BucketName {
+			return parts[1], true
+		}
+		return "", false
+	}
+
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Host == "" {
+		return "", false
+	}
+	if !strings.HasPrefix(parsed.Host, BucketName+".s3.") && parsed.Host != BucketName+".s3.amazonaws.com" {
+		return "", false
+	}
+
+	key, err := url.PathUnescape(strings.TrimPrefix(parsed.Path, "/"))
+	if err != nil || key == "" {
+		return "", false
+	}
+	return key, true
+}
+
+func escapeS3Key(key string) string {
+	parts := strings.Split(key, "/")
+	for i, part := range parts {
+		parts[i] = url.PathEscape(part)
+	}
+	return strings.Join(parts, "/")
 }

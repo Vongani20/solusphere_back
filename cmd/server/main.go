@@ -7,6 +7,7 @@ import (
 	"os"
 	"solusphere_backend/database"
 	"solusphere_backend/handlers"
+	"solusphere_backend/internal/ai"
 	"solusphere_backend/internal/secrets"
 	"solusphere_backend/middleware"
 	"solusphere_backend/models"
@@ -19,7 +20,8 @@ import (
 
 type AppSecrets struct {
 	JWTSecret     string
-	GeminiAPIKey  string
+	OpenAIAPIKey  string
+	OpenAIModel   string
 	DBUser        string
 	DBPassword    string
 	DBHost        string
@@ -65,7 +67,8 @@ func main() {
 			DBPassword:    getStringValue(secretData, "DB_PASSWORD", "Caswell1234"),
 			DBName:        getStringValue(secretData, "DB_NAME", "solusphere"),
 			JWTSecret:     getStringValue(secretData, "JWT_SECRET", "default-jwt-secret"),
-			GeminiAPIKey:  getStringValue(secretData, "GEMINI_API_KEY", ""),
+			OpenAIAPIKey:  getStringValue(secretData, "OPENAI_API_KEY", ""),
+			OpenAIModel:   getStringValue(secretData, "OPENAI_MODEL", "gpt-4.1-mini"),
 			AWSRegion:     getStringValue(secretData, "AWS_REGION", "eu-west-1"),
 			AWSBucketName: getStringValue(secretData, "AWS_BUCKET_NAME", "innovationform"),
 		}
@@ -102,7 +105,8 @@ func main() {
 		// Convert to AppSecrets
 		appSecrets = &AppSecrets{
 			JWTSecret:     appSecretsRaw.JWTSecret,
-			GeminiAPIKey:  appSecretsRaw.GeminiAPIKey,
+			OpenAIAPIKey:  appSecretsRaw.OpenAIAPIKey,
+			OpenAIModel:   appSecretsRaw.OpenAIModel,
 			DBUser:        appSecretsRaw.DBUser,
 			DBPassword:    appSecretsRaw.DBPassword,
 			DBHost:        appSecretsRaw.DBHost,
@@ -146,32 +150,51 @@ func main() {
 			DBPassword:    getEnv("DB_PASSWORD", ""),
 			DBName:        getEnv("DB_NAME", "solusphere"),
 			JWTSecret:     getEnv("JWT_SECRET", "default-jwt-secret"),
-			GeminiAPIKey:  getEnv("GEMINI_API_KEY", ""),
+			OpenAIAPIKey:  getEnv("OPENAI_API_KEY", ""),
+			OpenAIModel:   getEnv("OPENAI_MODEL", "gpt-4.1-mini"),
 			AWSRegion:     getEnv("AWS_REGION", "eu-west-1"),
 			AWSBucketName: getEnv("AWS_BUCKET_NAME", "innovationform"),
+			AWSAccessKey:  getEnv("AWS_ACCESS_KEY_ID", ""),
+			AWSSecretKey:  getEnv("AWS_SECRET_ACCESS_KEY", ""),
 		}
 	}
+
+	// Debug: Print loaded credentials
+	log.Println("=== CREDENTIALS LOADED ===")
+	log.Printf("DB_HOST: %s", appSecrets.DBHost)
+	log.Printf("DB_USER: %s", appSecrets.DBUser)
+	log.Printf("DB_NAME: %s", appSecrets.DBName)
+	log.Printf("AWS_REGION: %s", appSecrets.AWSRegion)
+	log.Printf("AWS_BUCKET_NAME: %s", appSecrets.AWSBucketName)
+	log.Printf("AWS_ACCESS_KEY_ID: %s", configuredLabel(appSecrets.AWSAccessKey))
+	log.Printf("AWS_SECRET_ACCESS_KEY: %s", configuredLabel(appSecrets.AWSSecretKey))
+	log.Println("==========================")
 
 	// Validate required secrets
 	if appSecrets.JWTSecret == "" || appSecrets.JWTSecret == "default-jwt-secret" {
 		log.Println(" Warning: JWT_SECRET is not set properly")
 	}
-	if appSecrets.GeminiAPIKey == "" {
-		log.Println(" Warning: GEMINI_API_KEY is not set")
+	if appSecrets.OpenAIAPIKey == "" {
+		log.Println(" Warning: OPENAI_API_KEY is not set")
 	}
 	if appSecrets.DBPassword == "" {
 		log.Println(" Warning: DB_PASSWORD is not set")
 	}
 
+	appSecrets.OpenAIModel = ai.NormalizeOpenAIModel(appSecrets.OpenAIModel)
+
 	// Set environment variables from secrets
 	os.Setenv("JWT_SECRET", appSecrets.JWTSecret)
-	os.Setenv("GEMINI_API_KEY", appSecrets.GeminiAPIKey)
+	os.Setenv("OPENAI_API_KEY", appSecrets.OpenAIAPIKey)
+	os.Setenv("OPENAI_MODEL", appSecrets.OpenAIModel)
 	os.Setenv("DB_USER", appSecrets.DBUser)
 	os.Setenv("DB_PASSWORD", appSecrets.DBPassword)
 	os.Setenv("DB_HOST", appSecrets.DBHost)
 	os.Setenv("DB_NAME", appSecrets.DBName)
 	os.Setenv("AWS_REGION", appSecrets.AWSRegion)
 	os.Setenv("AWS_BUCKET_NAME", appSecrets.AWSBucketName)
+	os.Setenv("AWS_ACCESS_KEY_ID", appSecrets.AWSAccessKey)
+	os.Setenv("AWS_SECRET_ACCESS_KEY", appSecrets.AWSSecretKey)
 
 	// Initialize MySQL database
 	log.Printf(" Connecting to MySQL database at %s:%s", appSecrets.DBHost, appSecrets.DBPort)
@@ -235,29 +258,43 @@ func main() {
 		log.Println(" AWS credentials not provided, skipping AWS services initialization")
 	}
 
-	// Initialize services
-	rekogSvc := services.NewRekognitionService()
-
-	// Initialize Gemini chat service
-	if appSecrets.GeminiAPIKey != "" {
-		log.Println(" Initializing Gemini AI service...")
-		services.InitGeminiWithKey(appSecrets.GeminiAPIKey)
+	// Initialize Rekognition service when credentials are available.
+	var rekogSvc *services.RekognitionService
+	if appSecrets.AWSAccessKey != "" && appSecrets.AWSSecretKey != "" {
+		log.Println(" Initializing Rekognition service...")
+		rekogSvc = services.NewRekognitionServiceWithCredentials(
+			appSecrets.AWSAccessKey,
+			appSecrets.AWSSecretKey,
+			appSecrets.AWSRegion,
+			appSecrets.AWSBucketName,
+		)
+	} else {
+		log.Println(" Rekognition credentials not provided; face recognition endpoints will return 503")
 	}
 
-	// Initialize Gemini Service for PDF processing
-	var geminiService *services.GeminiService
-	if appSecrets.GeminiAPIKey != "" {
-		geminiService, err = services.NewGeminiService(appSecrets.GeminiAPIKey)
+	// Initialize OpenAI service
+	if appSecrets.OpenAIAPIKey != "" {
+		log.Println(" Initializing OpenAI service...")
+		services.InitOpenAIWithKey(appSecrets.OpenAIAPIKey, appSecrets.OpenAIModel)
+		log.Printf(" OpenAI model: %s", services.GetOpenAIModel())
+	} else {
+		log.Println(" OpenAI API key not provided; AI endpoints will return fallback responses or 503")
+	}
+
+	// Initialize OpenAI service for PDF processing
+	var openAIService *services.OpenAIService
+	if appSecrets.OpenAIAPIKey != "" {
+		openAIService, err = services.NewOpenAIService(appSecrets.OpenAIAPIKey, appSecrets.OpenAIModel)
 		if err != nil {
-			log.Printf(" Warning: Failed to initialize Gemini service: %v", err)
+			log.Printf(" Warning: Failed to initialize OpenAI service: %v", err)
 		} else {
-			defer geminiService.Close()
-			log.Println(" Gemini service initialized successfully")
+			defer openAIService.Close()
+			log.Println(" OpenAI service initialized successfully")
 		}
 	}
 
 	// Initialize PDF Processor
-	pdfProcessor := services.NewPDFProcessor(geminiService)
+	pdfProcessor := services.NewPDFProcessor(openAIService)
 
 	// Initialize Upload Service
 	uploadDir := os.Getenv("UPLOAD_DIR")
@@ -290,6 +327,16 @@ func main() {
 		log.Printf("%s %s %d %v", c.Request.Method, c.Request.URL.Path, c.Writer.Status(), duration)
 	})
 
+	// Swagger API documentation
+	r.GET("/", handlers.SwaggerRoot)
+	r.HEAD("/", handlers.SwaggerRoot)
+	r.GET("/swagger", handlers.SwaggerRoot)
+	r.HEAD("/swagger", handlers.SwaggerRoot)
+	r.GET("/swagger/", handlers.SwaggerRoot)
+	r.HEAD("/swagger/", handlers.SwaggerRoot)
+	r.GET("/swagger/index.html", handlers.SwaggerIndex)
+	r.GET("/swagger/doc.json", handlers.SwaggerSpec)
+
 	// Debug endpoints
 	r.GET("/debug/db", func(c *gin.Context) {
 		status := database.GetDBStatus()
@@ -313,29 +360,71 @@ func main() {
 		c.JSON(200, gin.H{"message": "pong"})
 	})
 
-	// Public routes
+	// ============================================
+	// ROUTES REGISTRATION
+	// ============================================
+
+	// Public routes - Authentication (no auth required)
 	public := r.Group("/api/auth")
 	{
 		public.POST("/register", handlers.Register)
+		public.POST("/outlook365/signup", handlers.Outlook365Signup)
 		public.POST("/login", handlers.Login)
+		public.POST("/forgot-password", handlers.ForgotPassword)
+		public.POST("/reset-password", handlers.ResetPassword)
 		public.POST("/face-login", handlers.FaceLogin(rekogSvc))
 	}
 
-	// Protected routes
+	// Public face recognition endpoint (for login)
+	r.POST("/api/upload-face", handlers.FaceLogin(rekogSvc))
+
+	// Protected routes (require authentication)
 	protected := r.Group("/api")
 	protected.Use(middleware.AuthMiddleware())
+	protected.Use(middleware.RequireCompletedFaceRegistration())
 	{
 		// User routes
 		protected.GET("/profile", handlers.Profile)
+		protected.PATCH("/auth/password", handlers.UpdatePassword)
+		protected.GET("/users", handlers.ListChatUsers)
+
+		// Face registration - requires authentication
+		protected.POST("/face/register", handlers.RegisterFace(rekogSvc))
+		protected.PUT("/face/update", handlers.UpdateFace(rekogSvc))
+		protected.DELETE("/face/delete", handlers.DeleteFace(rekogSvc))
 
 		// Helpdesk routes
 		protected.POST("/helpdesk", handlers.SubmitTicketHandler)
 		protected.POST("/helpdesk-chat", handlers.HelpdeskChatHandler)
 
-		// Chatbot route
-		if appSecrets.GeminiAPIKey != "" {
-			protected.POST("/chatbot", handlers.ChatbotHandler(appSecrets.GeminiAPIKey))
+		// Event chat routes
+		protected.GET("/events", handlers.ListEvents)
+		protected.POST("/events/:event_id/join", handlers.JoinEvent)
+		protected.GET("/events/:event_id/comments", handlers.ListEventMessages)
+		protected.POST("/events/:event_id/comments", handlers.SendEventMessage)
+		protected.GET("/events/:event_id/messages", handlers.ListEventMessages)
+		protected.POST("/events/:event_id/messages", handlers.SendEventMessage)
+
+		// Direct user chat routes
+		protected.GET("/chats", handlers.ListDirectConversations)
+		protected.GET("/chats/:user_id/messages", handlers.ListDirectMessages)
+		protected.POST("/chats/:user_id/messages", handlers.SendDirectMessage)
+
+		// Admin event chat routes
+		admin := protected.Group("/admin")
+		{
+			admin.POST("/bootstrap", handlers.BootstrapAdmin)
+			admin.POST("/users", handlers.CreateUserByAdmin)
+			admin.POST("/events", handlers.CreateEvent)
+			admin.PATCH("/users/:user_id/role", handlers.UpdateUserRole)
+			admin.GET("/events/:event_id/comments", handlers.ListEventMessages)
+			admin.POST("/events/:event_id/comments", handlers.SendEventMessage)
+			admin.GET("/events/:event_id/messages", handlers.ListEventMessages)
+			admin.POST("/events/:event_id/messages", handlers.SendEventMessage)
 		}
+
+		// Chatbot route
+		protected.POST("/chatbot", handlers.ChatbotHandler())
 
 		// BPO Analysis routes
 		bpo := protected.Group("/bpo")
@@ -350,11 +439,20 @@ func main() {
 		protected.POST("/upload", handlers.UploadHandler)
 	}
 
-	// Health check
+	// Health check endpoint
 	r.GET("/health", func(c *gin.Context) {
 		dbStatus := "healthy"
 		if err := database.DB.Ping(); err != nil {
 			dbStatus = "unhealthy: " + err.Error()
+		}
+
+		awsStatus := "not_configured"
+		if appSecrets.AWSAccessKey != "" && appSecrets.AWSSecretKey != "" {
+			awsStatus = "configured"
+		}
+		openAIStatus := "not_configured"
+		if services.IsOpenAIInitialized() {
+			openAIStatus = "configured"
 		}
 
 		c.JSON(200, gin.H{
@@ -364,7 +462,9 @@ func main() {
 			"database_type":  "MySQL",
 			"database_host":  appSecrets.DBHost,
 			"database_name":  appSecrets.DBName,
-			"aws_status":     "configured",
+			"aws_status":     awsStatus,
+			"openai_status":  openAIStatus,
+			"openai_model":   services.GetOpenAIModel(),
 			"secrets_source": getSecretsSource(useAWSSecrets, useSecretsAgent),
 			"secret_name":    os.Getenv("AWS_SECRET_NAME"),
 			"port":           2080,
@@ -381,6 +481,40 @@ func main() {
 	log.Printf(" Server starting on port %s", port)
 	log.Printf(" Environment: %s", gin.Mode())
 	log.Printf(" Secrets source: %s", getSecretsSource(useAWSSecrets, useSecretsAgent))
+	log.Println("========================================")
+	log.Println("Available endpoints:")
+	log.Println("  GET  /swagger/index.html")
+	log.Println("  GET  /swagger/doc.json")
+	log.Println("  POST /api/auth/register")
+	log.Println("  POST /api/auth/outlook365/signup")
+	log.Println("  POST /api/auth/login")
+	log.Println("  POST /api/auth/forgot-password")
+	log.Println("  POST /api/auth/reset-password")
+	log.Println("  POST /api/auth/face-login  ✅ Face recognition login")
+	log.Println("  POST /api/upload-face      ✅ Alias for face-login")
+	log.Println("  POST /api/face/register    ✅ Register new face (requires auth)")
+	log.Println("  PUT  /api/face/update      ✅ Update face (requires auth)")
+	log.Println("  DELETE /api/face/delete    ✅ Delete face (requires auth)")
+	log.Println("  GET  /api/profile (requires auth)")
+	log.Println("  PATCH /api/auth/password (requires auth)")
+	log.Println("  POST /api/helpdesk (requires auth)")
+	log.Println("  GET  /api/events (requires auth)")
+	log.Println("  POST /api/events/:event_id/join (requires auth)")
+	log.Println("  GET  /api/events/:event_id/comments (requires auth)")
+	log.Println("  POST /api/events/:event_id/comments (requires auth)")
+	log.Println("  GET  /api/events/:event_id/messages (requires auth)")
+	log.Println("  POST /api/events/:event_id/messages (requires auth)")
+	log.Println("  GET  /api/users (requires auth)")
+	log.Println("  GET  /api/chats (requires auth)")
+	log.Println("  GET  /api/chats/:user_id/messages (requires auth)")
+	log.Println("  POST /api/chats/:user_id/messages (requires auth)")
+	log.Println("  POST /api/admin/bootstrap (requires auth, first admin only)")
+	log.Println("  POST /api/admin/users (admin)")
+	log.Println("  POST /api/admin/events (admin)")
+	log.Println("  PATCH /api/admin/users/:user_id/role (admin)")
+	log.Println("  POST /api/chatbot (requires auth)")
+	log.Println("  POST /api/bpo/analyze-pdf (requires auth)")
+	log.Println("  GET  /health")
 	log.Println("========================================")
 
 	if err := r.Run(":" + port); err != nil {
@@ -415,4 +549,11 @@ func getSecretsSource(useAWS, useAgent bool) string {
 		return "aws-secrets-manager"
 	}
 	return "environment-variables"
+}
+
+func configuredLabel(value string) string {
+	if value == "" {
+		return "(not set)"
+	}
+	return "(set)"
 }

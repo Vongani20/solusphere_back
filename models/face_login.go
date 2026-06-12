@@ -11,5 +11,6 @@ type UserMinimal struct {
 	ID       int    `json:"id"`
 	Username string `json:"username"`
 	Email    string `json:"email"`
+	Role     string `json:"role"`
 	ImageURL string `json:"image_url"`
 }

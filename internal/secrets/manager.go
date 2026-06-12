@@ -16,7 +16,8 @@ import (
 // AppSecrets holds all application secrets
 type AppSecrets struct {
 	JWTSecret     string `json:"JWT_SECRET"`
-	GeminiAPIKey  string `json:"GEMINI_API_KEY"`
+	OpenAIAPIKey  string `json:"OPENAI_API_KEY"`
+	OpenAIModel   string `json:"OPENAI_MODEL"`
 	DBUser        string `json:"DB_USER"`
 	DBPassword    string `json:"DB_PASSWORD"`
 	DBHost        string `json:"DB_HOST"`

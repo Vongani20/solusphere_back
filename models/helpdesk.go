@@ -1,11 +1,14 @@
 package models
 
 import (
+	"context"
 	"fmt"
 	"solusphere_backend/database"
-	helpers "solusphere_backend/helper"
+	"solusphere_backend/internal/ai"
 	"time"
 )
+
+const HelpdeskStatusOpen = "open"
 
 type HelpDeskTicket struct {
 	ID          int       `json:"id"`
@@ -22,28 +25,14 @@ type HelpDeskTicket struct {
 
 // CreateTicket inserts a new ticket with AI analysis
 func CreateTicket(userID int, subject, description string) (*HelpDeskTicket, error) {
-	aiAnalysis, err := helpers.CallGeminiAI("Analyze ticket: " + description)
-	if err != nil {
-		fmt.Println("AI Analysis error:", err)
-		aiAnalysis = "AI analysis unavailable"
-	}
-
-	aiSolution, err := helpers.CallGeminiAI("Suggest solution for: " + description)
-	if err != nil {
-		fmt.Println("AI Solution error:", err)
-		aiSolution = "AI solution unavailable"
-	}
-
-	aiApproach, err := helpers.CallGeminiAI("Step-by-step approach for: " + description)
-	if err != nil {
-		fmt.Println("AI Approach error:", err)
-		aiApproach = "AI approach unavailable"
-	}
+	aiAnalysis := generateHelpdeskAI("Analyze ticket: "+description, "AI analysis unavailable")
+	aiSolution := generateHelpdeskAI("Suggest solution for: "+description, "AI solution unavailable")
+	aiApproach := generateHelpdeskAI("Step-by-step approach for: "+description, "AI approach unavailable")
 
 	query := `INSERT INTO help_desk_tickets (user_id, subject, description, ai_analysis, ai_solution, ai_approach, status)
 	          VALUES (?, ?, ?, ?, ?, ?, ?)`
 
-	res, err := database.DB.Exec(query, userID, subject, description, aiAnalysis, aiSolution, aiApproach, "pending")
+	res, err := database.DB.Exec(query, userID, subject, description, aiAnalysis, aiSolution, aiApproach, HelpdeskStatusOpen)
 	if err != nil {
 		return nil, err
 	}
@@ -58,8 +47,26 @@ func CreateTicket(userID int, subject, description string) (*HelpDeskTicket, err
 		AIAnalysis:  aiAnalysis,
 		AISolution:  aiSolution,
 		AIApproach:  aiApproach,
-		Status:      "pending",
+		Status:      HelpdeskStatusOpen,
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}, nil
+}
+
+func generateHelpdeskAI(prompt, fallback string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	result, err := ai.GenerateText(ctx, ai.GenerateTextRequest{
+		SystemPrompt:    "You are an experienced BPO helpdesk agent. Respond politely, professionally, and with practical operational detail.",
+		UserPrompt:      prompt,
+		MaxOutputTokens: 500,
+		Temperature:     0.4,
+	})
+	if err != nil {
+		fmt.Println("OpenAI helpdesk AI error:", err)
+		return fallback
+	}
+
+	return result
 }

@@ -11,12 +11,12 @@ import (
 )
 
 type PDFProcessor struct {
-	geminiService *GeminiService
+	openAIService *OpenAIService
 }
 
-func NewPDFProcessor(geminiService *GeminiService) *PDFProcessor {
+func NewPDFProcessor(openAIService *OpenAIService) *PDFProcessor {
 	return &PDFProcessor{
-		geminiService: geminiService,
+		openAIService: openAIService,
 	}
 }
 
@@ -49,17 +49,20 @@ func (p *PDFProcessor) ExtractTextFromPDF(filePath string) (string, int, error) 
 	return mockText, 1, nil
 }
 
-// AnalyzeBPOContent analyzes extracted text using Gemini AI
+// AnalyzeBPOContent analyzes extracted text using OpenAI
 func (p *PDFProcessor) AnalyzeBPOContent(ctx context.Context, text string, analysisType string) (map[string]interface{}, error) {
 	if text == "" {
 		return nil, fmt.Errorf("no text content to analyze")
 	}
+	if p.openAIService == nil {
+		return nil, fmt.Errorf("OpenAI service is not configured")
+	}
 
 	prompt := p.generateAnalysisPrompt(text, analysisType)
 
-	result, err := p.geminiService.AnalyzeContent(ctx, prompt)
+	result, err := p.openAIService.AnalyzeContent(ctx, prompt)
 	if err != nil {
-		return nil, fmt.Errorf("failed to analyze content with Gemini: %v", err)
+		return nil, fmt.Errorf("failed to analyze content with OpenAI: %v", err)
 	}
 
 	return p.parseAnalysisResult(result, analysisType), nil
@@ -149,7 +152,7 @@ func (p *PDFProcessor) parseAnalysisResult(result string, analysisType string) m
 		},
 		"processing_info": map[string]interface{}{
 			"processed_at": time.Now().Format(time.RFC3339),
-			"model_used":   "gemini-pro",
+			"model_used":   GetOpenAIModel(),
 			"api_version":  "v1",
 			"status":       "completed",
 		},

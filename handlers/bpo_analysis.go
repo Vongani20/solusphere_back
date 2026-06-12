@@ -246,7 +246,7 @@ func (h *BPOAnalysisHandler) processAnalysis(analysisID string) {
 	// Detect document type
 	docType := h.pdfProcessor.DetectDocumentType(extractedText)
 
-	// Analyze content with Gemini AI
+	// Analyze content with OpenAI
 	analysisResult, err := h.pdfProcessor.AnalyzeBPOContent(ctx, extractedText, docType)
 	if err != nil {
 		log.Printf("Error analyzing content: %v", err)

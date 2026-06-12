@@ -1,0 +1,1188 @@
+package handlers
+
+import (
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+)
+
+// SwaggerRoot redirects browser users to the interactive Swagger UI.
+func SwaggerRoot(c *gin.Context) {
+	c.Redirect(http.StatusFound, "/swagger/index.html")
+}
+
+// SwaggerIndex serves Swagger UI for the embedded OpenAPI document.
+func SwaggerIndex(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.Data(http.StatusOK, "text/html; charset=utf-8", []byte(swaggerIndexHTML))
+}
+
+// SwaggerSpec serves the OpenAPI document used by Swagger UI.
+func SwaggerSpec(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
+	c.Data(http.StatusOK, "application/json; charset=utf-8", []byte(openAPISpecJSON))
+}
+
+const swaggerIndexHTML = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Solusphere API Docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+  <style>
+    body { margin: 0; background: #f6f7f9; }
+    .topbar { display: none; }
+    #swagger-ui .scheme-container { border-radius: 0; box-shadow: none; }
+    .docs-fallback {
+      padding: 12px 16px;
+      background: #111827;
+      color: #fff;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+    }
+    .docs-fallback a { color: #93c5fd; }
+  </style>
+</head>
+<body>
+  <div class="docs-fallback">Solusphere API documentation. Raw spec: <a href="/swagger/doc.json">/swagger/doc.json</a></div>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    window.addEventListener("load", function () {
+      SwaggerUIBundle({
+        url: "/swagger/doc.json",
+        dom_id: "#swagger-ui",
+        deepLinking: true,
+        persistAuthorization: true,
+        displayRequestDuration: true
+      });
+    });
+  </script>
+</body>
+</html>`
+
+const openAPISpecJSON = `{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Solusphere Backend API",
+    "version": "1.0.0",
+    "description": "Authentication, face recognition, helpdesk, event chat, admin, file upload, chatbot, and BPO PDF analysis endpoints for Solusphere."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:2080",
+      "description": "Local development server"
+    }
+  ],
+  "tags": [
+    { "name": "Health" },
+    { "name": "Authentication" },
+    { "name": "Profile" },
+    { "name": "Face Recognition" },
+    { "name": "Helpdesk" },
+    { "name": "Events" },
+    { "name": "Admin" },
+    { "name": "AI" },
+    { "name": "BPO Analysis" },
+    { "name": "Uploads" },
+    { "name": "Debug" }
+  ],
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": ["Health"],
+        "summary": "Check API, database, AWS, and OpenAI configuration status",
+        "responses": {
+          "200": {
+            "description": "Server status",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/HealthResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/debug/db": {
+      "get": {
+        "tags": ["Debug"],
+        "summary": "Inspect database connection details",
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" }
+        }
+      }
+    },
+    "/debug/ping": {
+      "get": {
+        "tags": ["Debug"],
+        "summary": "Ping the database",
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/auth/register": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Register a new user",
+        "description": "New users must log in with email/password, then complete face registration with POST /api/face/register before using protected app endpoints.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RegisterRequest" },
+              "example": {
+                "username": "demo",
+                "email": "demo@example.com",
+                "phone_number": "+15551234567",
+                "password": "password123"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/auth/outlook365/signup": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Register an Outlook 365 account",
+        "description": "Creates a user with auth_provider set to outlook365. Microsoft 365 custom domains are supported, so the API does not restrict the email domain.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RegisterRequest" },
+              "example": {
+                "username": "m365.user",
+                "email": "user@company.com",
+                "phone_number": "+15551234567",
+                "password": "password123"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Log in with email and password",
+        "description": "Returns a JWT. If face_required is true, use the token to call POST /api/face/register before accessing protected app endpoints.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/LoginRequest" },
+              "example": {
+                "email": "demo@example.com",
+                "password": "password123"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "JWT token and user profile",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/LoginResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/auth/forgot-password": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Send password reset code by SMS and email",
+        "description": "Creates a short-lived reset code and delivers it through AWS SNS when a phone number is registered, and SMTP email when configured.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ForgotPasswordRequest" },
+              "example": { "email": "demo@example.com" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/auth/reset-password": {
+      "post": {
+        "tags": ["Authentication"],
+        "summary": "Reset password with delivered code",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ResetPasswordRequest" },
+              "example": {
+                "email": "demo@example.com",
+                "code": "123456",
+                "new_password": "newpassword123"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/auth/face-login": {
+      "post": {
+        "tags": ["Face Recognition", "Authentication"],
+        "summary": "Log in using a face image",
+        "description": "Accepts multipart face image uploads. The backend accepts common field names including face, image, file, and photo.",
+        "requestBody": { "$ref": "#/components/requestBodies/FaceImageUpload" },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/upload-face": {
+      "post": {
+        "tags": ["Face Recognition", "Authentication"],
+        "summary": "Alias for face login",
+        "requestBody": { "$ref": "#/components/requestBodies/FaceImageUpload" },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/profile": {
+      "get": {
+        "tags": ["Profile"],
+        "summary": "Get the current user's profile",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/auth/password": {
+      "patch": {
+        "tags": ["Authentication"],
+        "summary": "Update the current user's password",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UpdatePasswordRequest" },
+              "example": {
+                "current_password": "password123",
+                "new_password": "newpassword123"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/face/register": {
+      "post": {
+        "tags": ["Face Recognition"],
+        "summary": "Register the current user's face",
+        "description": "Required after first password login. This completes onboarding and unlocks protected app endpoints. If AWS Rekognition is not configured, the backend saves the uploaded face locally and completes onboarding in local mode.",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": { "$ref": "#/components/requestBodies/FaceImageUpload" },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/face/update": {
+      "put": {
+        "tags": ["Face Recognition"],
+        "summary": "Replace the current user's registered face",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": { "$ref": "#/components/requestBodies/FaceImageUpload" },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/face/delete": {
+      "delete": {
+        "tags": ["Face Recognition"],
+        "summary": "Delete the current user's registered face",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/helpdesk": {
+      "post": {
+        "tags": ["Helpdesk"],
+        "summary": "Submit a helpdesk ticket",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/HelpdeskTicketRequest" },
+              "example": {
+                "subject": "Login issue",
+                "description": "I cannot access my account."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/helpdesk-chat": {
+      "post": {
+        "tags": ["Helpdesk", "AI"],
+        "summary": "Send a message to the helpdesk AI assistant",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/HelpdeskChatRequest" },
+              "example": { "userMessage": "How do I reset my password?" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/events": {
+      "get": {
+        "tags": ["Events"],
+        "summary": "List events visible to the current user",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/events/{event_id}/join": {
+      "post": {
+        "tags": ["Events"],
+        "summary": "Join an event chat",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/EventID" }],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/events/{event_id}/messages": {
+      "get": {
+        "tags": ["Events"],
+        "summary": "List event chat messages",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "$ref": "#/components/parameters/EventID" },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "default": 50 }
+          }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "post": {
+        "tags": ["Events"],
+        "summary": "Send an event chat message",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/EventID" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/EventMessageRequest" },
+              "example": { "message": "Hello everyone." }
+            }
+          }
+        },
+        "responses": {
+          "201": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/events/{event_id}/comments": {
+      "get": {
+        "tags": ["Events"],
+        "summary": "List comments under an event image",
+        "description": "Alias for event messages. Responses include comments/messages with a nested sender user object for feed-style display.",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "$ref": "#/components/parameters/EventID" },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "default": 50 }
+          }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "post": {
+        "tags": ["Events"],
+        "summary": "Add a comment under an event image",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/EventID" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/EventMessageRequest" },
+              "example": { "message": "Great update." }
+            }
+          }
+        },
+        "responses": {
+          "201": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/admin/bootstrap": {
+      "post": {
+        "tags": ["Admin"],
+        "summary": "Promote the first authenticated user to admin",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "409": { "$ref": "#/components/responses/Error" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/admin/users": {
+      "post": {
+        "tags": ["Admin"],
+        "summary": "Create a user as an admin",
+        "description": "Creates a local user account and initializes the user's face-registration profile.",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/AdminCreateUserRequest" },
+              "example": {
+                "username": "new.user",
+                "email": "new.user@example.com",
+                "phone_number": "+15551234567",
+                "password": "password123",
+                "role": "user"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/admin/events": {
+      "post": {
+        "tags": ["Admin"],
+        "summary": "Create an event as an admin",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/EventCreateRequest" },
+              "example": {
+                "title": "Team briefing",
+                "description": "Daily operations update",
+                "image_url": "https://example.com/event-image.jpg"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/admin/users/{user_id}/role": {
+      "patch": {
+        "tags": ["Admin"],
+        "summary": "Update a user's role",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/UserID" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/UserRoleRequest" },
+              "example": { "role": "admin" }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "404": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/admin/events/{event_id}/messages": {
+      "get": {
+        "tags": ["Admin", "Events"],
+        "summary": "Admin list event chat messages",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "$ref": "#/components/parameters/EventID" },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": { "type": "integer", "default": 50 }
+          }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "post": {
+        "tags": ["Admin", "Events"],
+        "summary": "Admin send an event chat message",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/EventID" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/EventMessageRequest" },
+              "example": { "message": "Welcome to the event." }
+            }
+          }
+        },
+        "responses": {
+          "201": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "409": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/chatbot": {
+      "post": {
+        "tags": ["AI"],
+        "summary": "Send a message to the OpenAI web-search analytics agent",
+        "description": "Uses OpenAI Responses API. Web search is enabled by default for current public information, website research, and analytics-style questions. Research answers are instructed to use multiple independent sources when available.",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/ChatbotRequest" },
+              "example": {
+                "message": "Analyze https://example.com and tell me improvements with sources.",
+                "web_search": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Chatbot response",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ChatbotResponse" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "503": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/bpo/analyze-pdf": {
+      "post": {
+        "tags": ["BPO Analysis"],
+        "summary": "Upload a PDF for asynchronous BPO analysis",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["document"],
+                "properties": {
+                  "document": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "PDF document, maximum 20 MB"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/bpo/analysis/{id}": {
+      "get": {
+        "tags": ["BPO Analysis"],
+        "summary": "Get a BPO analysis by ID",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/AnalysisID" }],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "delete": {
+        "tags": ["BPO Analysis"],
+        "summary": "Delete a BPO analysis by ID",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/AnalysisID" }],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/bpo/analyses": {
+      "get": {
+        "tags": ["BPO Analysis"],
+        "summary": "List BPO analyses",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "schema": { "type": "integer", "default": 1, "minimum": 1 }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": { "type": "integer", "default": 10, "minimum": 1, "maximum": 100 }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "schema": { "type": "string" }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "schema": { "type": "string" }
+          }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/users": {
+      "get": {
+        "tags": ["Users", "Direct Chat"],
+        "summary": "List users available for direct chat",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/chats": {
+      "get": {
+        "tags": ["Direct Chat"],
+        "summary": "List direct chat conversations for the current user",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/chats/{user_id}/messages": {
+      "get": {
+        "tags": ["Direct Chat"],
+        "summary": "List direct messages with another user",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          { "$ref": "#/components/parameters/UserID" },
+          {
+            "name": "limit",
+            "in": "query",
+            "schema": { "type": "integer", "default": 50, "minimum": 1, "maximum": 100 }
+          }
+        ],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "post": {
+        "tags": ["Direct Chat"],
+        "summary": "Send a direct message to another user",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/UserID" }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/DirectMessageRequest" },
+              "example": { "message": "Hello, can we chat?" }
+            }
+          }
+        },
+        "responses": {
+          "201": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/upload": {
+      "post": {
+        "tags": ["Uploads"],
+        "summary": "Upload a general file",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["file"],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "File upload, maximum 10 MB"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "BearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "JWT"
+      }
+    },
+    "parameters": {
+      "EventID": {
+        "name": "event_id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "integer", "minimum": 1 }
+      },
+      "UserID": {
+        "name": "user_id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "integer", "minimum": 1 }
+      },
+      "AnalysisID": {
+        "name": "id",
+        "in": "path",
+        "required": true,
+        "schema": { "type": "string" }
+      }
+    },
+    "requestBodies": {
+      "FaceImageUpload": {
+        "required": true,
+        "content": {
+          "multipart/form-data": {
+            "schema": {
+              "type": "object",
+              "required": ["face"],
+              "properties": {
+                "face": {
+                  "type": "string",
+                  "format": "binary",
+                  "description": "JPEG or PNG face image, maximum 5 MB"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "Success": {
+        "description": "Successful response",
+        "content": {
+          "application/json": {
+            "schema": { "type": "object", "additionalProperties": true }
+          }
+        }
+      },
+      "Error": {
+        "description": "Error response",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+          }
+        }
+      },
+      "FaceRegistrationRequired": {
+        "description": "The authenticated user must complete face registration first.",
+        "content": {
+          "application/json": {
+            "schema": { "$ref": "#/components/schemas/FaceRegistrationRequiredResponse" },
+            "example": {
+              "error": "Face registration required",
+              "code": "FACE_REGISTRATION_REQUIRED",
+              "message": "Register your face before using this endpoint.",
+              "face_required": true,
+              "face_status": false,
+              "next_step": "POST /api/face/register"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "RegisterRequest": {
+        "type": "object",
+        "required": ["username", "email", "password"],
+        "properties": {
+          "username": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "phone_number": { "type": "string", "description": "E.164 format is recommended for AWS SNS SMS delivery." },
+          "password": { "type": "string", "minLength": 6 }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": ["email", "password"],
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "password": { "type": "string" }
+        }
+      },
+      "ForgotPasswordRequest": {
+        "type": "object",
+        "required": ["email"],
+        "properties": {
+          "email": { "type": "string", "format": "email" }
+        }
+      },
+      "ResetPasswordRequest": {
+        "type": "object",
+        "required": ["email", "code", "new_password"],
+        "properties": {
+          "email": { "type": "string", "format": "email" },
+          "code": { "type": "string", "minLength": 4 },
+          "new_password": { "type": "string", "minLength": 6 }
+        }
+      },
+      "UpdatePasswordRequest": {
+        "type": "object",
+        "required": ["current_password", "new_password"],
+        "properties": {
+          "current_password": { "type": "string" },
+          "new_password": { "type": "string", "minLength": 6 }
+        }
+      },
+      "LoginResponse": {
+        "type": "object",
+        "properties": {
+          "message": { "type": "string" },
+          "token": { "type": "string" },
+          "face_required": { "type": "boolean" },
+          "next_step": { "type": "string" },
+          "user": { "$ref": "#/components/schemas/User" }
+        }
+      },
+      "User": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "integer" },
+          "username": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "phone_number": { "type": "string" },
+          "auth_provider": { "type": "string", "enum": ["local", "outlook365"] },
+          "role": { "type": "string", "enum": ["user", "admin"] },
+          "face_status": { "type": "boolean" },
+          "image_url": { "type": "string", "nullable": true }
+        }
+      },
+      "HelpdeskTicketRequest": {
+        "type": "object",
+        "properties": {
+          "subject": { "type": "string" },
+          "description": { "type": "string" }
+        }
+      },
+      "HelpdeskChatRequest": {
+        "type": "object",
+        "required": ["userMessage"],
+        "properties": {
+          "userMessage": { "type": "string" }
+        }
+      },
+      "EventCreateRequest": {
+        "type": "object",
+        "required": ["title"],
+        "properties": {
+          "title": { "type": "string", "maxLength": 255 },
+          "description": { "type": "string" },
+          "image_url": { "type": "string", "format": "uri", "description": "Image displayed above comments in the event feed." }
+        }
+      },
+      "AdminCreateUserRequest": {
+        "type": "object",
+        "required": ["username", "email", "password"],
+        "properties": {
+          "username": { "type": "string" },
+          "email": { "type": "string", "format": "email" },
+          "phone_number": { "type": "string" },
+          "password": { "type": "string", "minLength": 6 },
+          "role": { "type": "string", "enum": ["user", "admin"], "default": "user" }
+        }
+      },
+      "EventMessageRequest": {
+        "type": "object",
+        "required": ["message"],
+        "properties": {
+          "message": { "type": "string", "maxLength": 4000 }
+        }
+      },
+      "DirectMessageRequest": {
+        "type": "object",
+        "required": ["message"],
+        "properties": {
+          "message": { "type": "string", "maxLength": 4000 }
+        }
+      },
+      "UserRoleRequest": {
+        "type": "object",
+        "required": ["role"],
+        "properties": {
+          "role": { "type": "string", "enum": ["user", "admin"] }
+        }
+      },
+      "ChatbotRequest": {
+        "type": "object",
+        "required": ["message"],
+        "properties": {
+          "message": { "type": "string" },
+          "web_search": {
+            "type": "boolean",
+            "description": "Defaults to true. Disable only when you want no public web lookup."
+          }
+        }
+      },
+      "ChatbotResponse": {
+        "type": "object",
+        "properties": {
+          "reply": { "type": "string" },
+          "sources": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": { "type": "string" },
+                "url": { "type": "string", "format": "uri" }
+              }
+            }
+          },
+          "source_count": { "type": "integer" },
+          "model": { "type": "string" },
+          "web_search_enabled": { "type": "boolean" },
+          "error": { "type": "string" }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "properties": {
+          "message": { "type": "string" },
+          "timestamp": { "type": "string", "format": "date-time" },
+          "database": { "type": "string" },
+          "database_type": { "type": "string" },
+          "database_host": { "type": "string" },
+          "database_name": { "type": "string" },
+          "aws_status": { "type": "string" },
+          "openai_status": { "type": "string" },
+          "openai_model": { "type": "string" },
+          "secrets_source": { "type": "string" },
+          "secret_name": { "type": "string" },
+          "port": { "type": "integer" }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string" },
+          "message": { "type": "string" },
+          "details": { "type": "string" }
+        }
+      },
+      "FaceRegistrationRequiredResponse": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string" },
+          "code": { "type": "string", "example": "FACE_REGISTRATION_REQUIRED" },
+          "message": { "type": "string" },
+          "face_required": { "type": "boolean" },
+          "face_status": { "type": "boolean" },
+          "next_step": { "type": "string", "example": "POST /api/face/register" }
+        }
+      }
+    }
+  }
+}`

@@ -3,6 +3,7 @@ package handlers
 import (
 	"net/http"
 	"solusphere_backend/models"
+	"solusphere_backend/services"
 
 	"github.com/gin-gonic/gin"
 )
@@ -14,7 +15,7 @@ func HelpdeskChatHandler(c *gin.Context) {
 		return
 	}
 
-	reply, err := models.GetBPOResponse(req.UserMessage)
+	reply, err := services.GetBPOResponse(req.UserMessage)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

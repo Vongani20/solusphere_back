@@ -3,16 +3,17 @@ package handlers
 import (
 	"context"
 	"database/sql"
-	"io"
+	"log"
 	"net/http"
 	"strconv"
 	"time"
 
 	"solusphere_backend/database"
+	"solusphere_backend/middleware"
 	"solusphere_backend/models"
 	"solusphere_backend/services"
-	"solusphere_backend/utils"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/gin-gonic/gin"
 )
 
@@ -20,78 +21,117 @@ func FaceLogin(rekogSvc *services.RekognitionService) gin.HandlerFunc {
 	const mainCollectionID = "solusphere_user_faces_index"
 
 	return func(c *gin.Context) {
-		// --- 1. Read uploaded face image ---
-		file, _, err := c.Request.FormFile("face")
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "No face file uploaded"})
-			return
-		}
-		defer file.Close()
+		log.Println("========================================")
+		log.Println("🔐 FACE LOGIN HANDLER CALLED")
+		log.Println("========================================")
 
-		sourceBytes, err := io.ReadAll(file)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read uploaded file"})
+		if !ensureRekognitionConfigured(c, rekogSvc) {
 			return
 		}
 
-		// --- 2. Search Rekognition collection ---
+		sourceBytes, header, fieldName, err := readFaceImageUpload(c, defaultFaceFieldNames)
+		if err != nil {
+			log.Printf("❌ Failed to read face upload: %v", err)
+			if !writeFaceUploadError(c, err) {
+				c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to read uploaded file"})
+			}
+			return
+		}
+		log.Printf("📸 Received face file from field %q: %s, size: %d bytes", fieldName, header.Filename, len(sourceBytes))
+
+		// Search Rekognition collection
+		log.Printf("🔍 Searching for face in Rekognition collection: %s", mainCollectionID)
+
 		resp, err := rekogSvc.SearchCollectionByImage(mainCollectionID, sourceBytes)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to search face index"})
-			return
-		}
-
-		if len(resp.FaceMatches) == 0 {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Face not recognized in the system"})
-			return
-		}
-
-		match := resp.FaceMatches[0]
-		similarity := *match.Similarity
-		rekognitionUserIDStr := *match.Face.ExternalImageId
-
-		userID, err := strconv.Atoi(rekognitionUserIDStr)
-		if err != nil {
+			log.Printf("❌ Failed to search face index: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{
-				"error":   "Malformed user ID retrieved from face index",
-				"details": rekognitionUserIDStr,
+				"error":   "Failed to search face index",
+				"details": err.Error(),
 			})
 			return
 		}
 
-		// --- 3. Database lookup with timeout ---
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		if len(resp.FaceMatches) == 0 {
+			log.Printf("⚠️ No face matches found")
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Face not recognized"})
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
 		defer cancel()
 
-		var user models.UserMinimal
-		query := `SELECT id, username, email FROM users WHERE id = ?`
-		row := database.DB.QueryRowContext(ctx, query, userID)
+		query := `
+			SELECT u.id, u.username, u.email, u.role, uf.status, COALESCE(uf.image_url, ''), COALESCE(uf.face_id, '')
+			FROM users u
+			INNER JOIN user_faces uf ON uf.user_id = u.id
+			WHERE u.id = ?
+		`
 
-		if err := row.Scan(&user.ID, &user.Username, &user.Email); err != nil {
-			if err == sql.ErrNoRows {
-				c.JSON(http.StatusNotFound, gin.H{
-					"error":      "User found in face index but not in database",
-					"id_checked": userID,
-				})
+		for _, match := range resp.FaceMatches {
+			if match.Face == nil {
+				log.Printf("⚠️ Rekognition returned a match without face metadata")
+				continue
+			}
+
+			similarity := aws.ToFloat32(match.Similarity)
+			rekognitionUserIDStr := aws.ToString(match.Face.ExternalImageId)
+			rekognitionFaceID := aws.ToString(match.Face.FaceId)
+			if rekognitionUserIDStr == "" || rekognitionFaceID == "" {
+				log.Printf("⚠️ Rekognition match missing user or face id")
+				continue
+			}
+
+			userID, err := strconv.Atoi(rekognitionUserIDStr)
+			if err != nil {
+				log.Printf("⚠️ Rekognition match has malformed user ID %q", rekognitionUserIDStr)
+				continue
+			}
+
+			var (
+				user         models.UserMinimal
+				faceStatus   bool
+				imageURL     string
+				storedFaceID string
+			)
+			row := database.DB.QueryRowContext(ctx, query, userID)
+			if err := row.Scan(&user.ID, &user.Username, &user.Email, &user.Role, &faceStatus, &imageURL, &storedFaceID); err != nil {
+				if err == sql.ErrNoRows {
+					log.Printf("⚠️ Face match belongs to missing or unregistered user ID %d", userID)
+					continue
+				}
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 				return
 			}
-			// handle other DB errors (e.g., timeout, connection issues)
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error during user retrieval"})
+
+			if !faceStatus || storedFaceID == "" {
+				log.Printf("⚠️ Face match belongs to user %d, but DB face is inactive or missing", userID)
+				continue
+			}
+
+			if storedFaceID != rekognitionFaceID {
+				log.Printf("⚠️ Rekognition face mismatch for user %d: matched=%s stored=%s", userID, rekognitionFaceID, storedFaceID)
+				continue
+			}
+
+			user.ImageURL = imageURL
+
+			token, err := middleware.GenerateToken(user.ID, user.Username)
+			if err != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
+				return
+			}
+
+			log.Printf("✅ Face login successful - Similarity: %.2f%%, UserID: %d", similarity, user.ID)
+			c.JSON(http.StatusOK, models.FaceLoginResponse{
+				Message:    "Face login successful",
+				Token:      token,
+				Similarity: similarity,
+				User:       user,
+			})
 			return
 		}
 
-		// --- 4. Generate JWT ---
-		token, err := utils.GenerateTokenWithEmail(user.Email, user.ID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
-			return
-		}
-
-		c.JSON(http.StatusOK, models.FaceLoginResponse{
-			Message:    "Face login successful",
-			Token:      token,
-			Similarity: similarity,
-			User:       user,
-		})
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Face not recognized"})
 	}
 }

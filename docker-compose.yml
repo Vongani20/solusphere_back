@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   db:
     image: mysql:8.0
@@ -39,9 +37,22 @@ services:
       - DB_USER=solusphere_users
       - DB_PASSWORD=Caswell1234
       - DB_NAME=solusphere
+      - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
+      - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
+      - AWS_REGION=${AWS_REGION:-eu-west-1}
+      - AWS_BUCKET_NAME=${AWS_BUCKET_NAME:-innovationform}
+      - AWS_EC2_METADATA_DISABLED=true
       - GIN_MODE=release
       - PORT=2080
       - UPLOAD_DIR=/app/uploads
+      - JWT_SECRET=solusphere-jwt-secret-key-2024
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4.1-mini}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-}
+      - SMTP_USERNAME=${SMTP_USERNAME:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - SMTP_FROM=${SMTP_FROM:-}
     volumes:
       - ./uploads:/app/uploads
     networks:

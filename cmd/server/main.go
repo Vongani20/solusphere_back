@@ -348,7 +348,8 @@ func main() {
 			"http://localhost:2080",
 			"http://3.250.102.248:2080",
 			"https://d25x8zzf939iqa.cloudfront.net",
-			"http://solusphere-frontend.s3-website-us-east-1.amazonaws.com",  // Add this
+			"http://solusphere-frontend.s3-website-us-east-1.amazonaws.com",
+			"http://solusphere-ui.s3-website-eu-west-1.amazonaws.com",        // Add this
 			"https://solusphere-frontend.s3-website-us-east-1.amazonaws.com", // Also add HTTPS version
 		},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"},

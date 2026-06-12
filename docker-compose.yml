@@ -30,22 +30,23 @@ services:
       db:
         condition: service_healthy
     environment:
-      - USE_AWS_SECRETS_MANAGER=false
-      - USE_SECRETS_AGENT=false
-      - DB_HOST=db
-      - DB_PORT=3306
-      - DB_USER=solusphere_users
-      - DB_PASSWORD=Caswell1234
-      - DB_NAME=solusphere
+      - USE_AWS_SECRETS_MANAGER=${USE_AWS_SECRETS_MANAGER:-false}
+      - USE_SECRETS_AGENT=${USE_SECRETS_AGENT:-false}
+      - AWS_SECRET_NAME=${AWS_SECRET_NAME:-}
+      - DB_HOST=${DB_HOST:-db}
+      - DB_PORT=${DB_PORT:-3306}
+      - DB_USER=${DB_USER:-solusphere_users}
+      - DB_PASSWORD=${DB_PASSWORD:-Caswell1234}
+      - DB_NAME=${DB_NAME:-solusphere}
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-}
       - AWS_REGION=${AWS_REGION:-eu-west-1}
       - AWS_BUCKET_NAME=${AWS_BUCKET_NAME:-innovationform}
-      - AWS_EC2_METADATA_DISABLED=true
+      - AWS_EC2_METADATA_DISABLED=${AWS_EC2_METADATA_DISABLED:-false}
       - GIN_MODE=release
       - PORT=2080
       - UPLOAD_DIR=/app/uploads
-      - JWT_SECRET=solusphere-jwt-secret-key-2024
+      - JWT_SECRET=${JWT_SECRET:-solusphere-jwt-secret-key-2024}
       - OPENAI_API_KEY=${OPENAI_API_KEY:-}
       - OPENAI_MODEL=${OPENAI_MODEL:-gpt-4.1-mini}
       - SMTP_HOST=${SMTP_HOST:-}

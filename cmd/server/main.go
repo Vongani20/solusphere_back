@@ -341,7 +341,7 @@ func main() {
 
 	// CORS configuration
 	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"http://localhost:5173", "http://localhost:3000", "http://localhost:2080", "http://3.250.102.248:2080"},
+		AllowOrigins:     []string{"http://localhost:5173", "http://localhost:3000", "http://localhost:2080", "http://3.250.102.248:2080", "https://d25x8zzf939iqa.cloudfront.net"},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"},
 		AllowHeaders:     []string{"Origin", "Authorization", "Content-Type", "X-Requested-With"},
 		ExposeHeaders:    []string{"Content-Length"},

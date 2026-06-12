@@ -57,7 +57,7 @@ func UploadFile(db *sql.DB, file *multipart.FileHeader, userID int) (string, err
 		}
 	*/
 
-	return filePath, nil
+	return "/uploads/" + filename, nil
 }
 
 // generateRandomString generates a random string for filenames

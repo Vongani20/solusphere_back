@@ -337,6 +337,7 @@ func main() {
 
 	// Create Gin router
 	r := gin.Default()
+	r.Static("/uploads", uploadDir)
 
 	// CORS configuration
 	r.Use(cors.New(cors.Config{

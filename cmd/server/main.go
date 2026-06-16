@@ -351,6 +351,7 @@ func main() {
 			"http://solusphere-frontend.s3-website-us-east-1.amazonaws.com",
 			"http://solusphere-ui.s3-website-eu-west-1.amazonaws.com",        // Add this
 			"https://solusphere-frontend.s3-website-us-east-1.amazonaws.com", // Also add HTTPS version
+			"https://d22snf4es6f4ui.cloudfront.net",
 		},
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"},
 		AllowHeaders:     []string{"Origin", "Authorization", "Content-Type", "X-Requested-With"},

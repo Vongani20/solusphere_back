@@ -85,6 +85,7 @@ const openAPISpecJSON = `{
     { "name": "Admin" },
     { "name": "AI" },
     { "name": "BPO Analysis" },
+    { "name": "CV Builder" },
     { "name": "Uploads" },
     { "name": "Debug" }
   ],
@@ -1064,6 +1065,315 @@ const openAPISpecJSON = `{
         }
       }
     },
+    "/api/cv": {
+      "get": {
+        "tags": ["CV Builder"],
+        "summary": "Get the current user's CV data",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "CV profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "cv": { "$ref": "#/components/schemas/CVProfile" } }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" }
+        }
+      },
+      "post": {
+        "tags": ["CV Builder"],
+        "summary": "Create or fully replace the current user's CV data",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CVUpsertRequest" },
+              "example": {
+                "first_name": "Jane",
+                "last_name": "Doe",
+                "profile_text": "Experienced BPO analyst with 8 years in process optimisation.",
+                "value_proposition": "I streamline back-office operations to reduce cost by 20-30%.",
+                "gender": "Female",
+                "nationality": "South African",
+                "date_of_birth": "1990-06-15",
+                "professional_skills": [
+                  { "skill": "Process Management", "details": ["Lean Six Sigma", "BPMN modelling"] }
+                ],
+                "qualifications": ["BCom Information Systems, UCT, 2012"],
+                "computer_skills": ["Microsoft Office 365", "SAP", "Power BI"],
+                "professional_memberships": ["IITPSA"],
+                "languages": ["English", "Afrikaans"],
+                "experience": [
+                  {
+                    "company": "Acme BPO",
+                    "position": "Senior Analyst",
+                    "period_start": "2018-03",
+                    "period_end": "2024-01",
+                    "scope_of_work": ["Led a team of 5 analysts", "Reduced processing time by 25%"]
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Saved CV",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "cv": { "$ref": "#/components/schemas/CVProfile" } }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "patch": {
+        "tags": ["CV Builder"],
+        "summary": "Partially update the current user's CV data",
+        "description": "Same handler as POST — send only the fields you want to change. Omitted fields are kept as-is.",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/CVUpsertRequest" },
+              "example": {
+                "profile_text": "Updated profile summary."
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/cv/photo": {
+      "post": {
+        "tags": ["CV Builder"],
+        "summary": "Upload a profile photo for the CV",
+        "description": "Accepts JPG or PNG up to 5 MB. The photo is stored in S3 and the URL is saved to the CV record.",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["photo"],
+                "properties": {
+                  "photo": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "JPG or PNG image, max 5 MB"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Photo uploaded",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "profile_photo_url": { "type": "string", "format": "uri" } }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/cv/download": {
+      "get": {
+        "tags": ["CV Builder"],
+        "summary": "Download the current user's CV as a branded PDF",
+        "description": "Generates a two-page SoluGrowth-branded PDF from the stored CV data and returns it as a file download.",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "PDF file",
+            "content": {
+              "application/pdf": {
+                "schema": { "type": "string", "format": "binary" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/cv/search": {
+      "get": {
+        "tags": ["CV Builder"],
+        "summary": "Search the talent directory by skill or qualification",
+        "description": "At least one of 'skill' or 'qualification' must be provided. Returns matching CV summaries including each person's skills and qualifications. Case-insensitive substring match.",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "skill",
+            "in": "query",
+            "required": false,
+            "description": "Substring to match against professional skills (e.g. 'Python', 'SAP', 'Lean')",
+            "schema": { "type": "string", "example": "SAP" }
+          },
+          {
+            "name": "qualification",
+            "in": "query",
+            "required": false,
+            "description": "Substring to match against qualifications (e.g. 'BCom', 'MBA', 'PMP')",
+            "schema": { "type": "string", "example": "BCom" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching CV summaries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/CVProfileSummary" }
+                    },
+                    "count": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/admin/cvs": {
+      "get": {
+        "tags": ["CV Builder", "Admin"],
+        "summary": "List all CV profiles (admin) with optional filters",
+        "description": "Returns all CVs by default. Use 'skill' or 'qualification' query params to narrow results. Case-insensitive substring match on JSON data.",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "skill",
+            "in": "query",
+            "required": false,
+            "description": "Filter by skill substring (e.g. 'Python', 'SAP')",
+            "schema": { "type": "string", "example": "SAP" }
+          },
+          {
+            "name": "qualification",
+            "in": "query",
+            "required": false,
+            "description": "Filter by qualification substring (e.g. 'BCom', 'MBA')",
+            "schema": { "type": "string", "example": "BCom" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "CV summaries",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "cvs": {
+                      "type": "array",
+                      "items": { "$ref": "#/components/schemas/CVProfileSummary" }
+                    },
+                    "count": { "type": "integer" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/admin/cvs/{user_id}": {
+      "get": {
+        "tags": ["CV Builder", "Admin"],
+        "summary": "Get a specific user's full CV (admin)",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/UserID" }],
+        "responses": {
+          "200": {
+            "description": "Full CV profile",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "cv": { "$ref": "#/components/schemas/CVProfile" } }
+                }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" }
+        }
+      }
+    },
+    "/api/admin/cvs/{user_id}/download": {
+      "get": {
+        "tags": ["CV Builder", "Admin"],
+        "summary": "Download any user's CV as a branded PDF (admin)",
+        "security": [{ "BearerAuth": [] }],
+        "parameters": [{ "$ref": "#/components/parameters/UserID" }],
+        "responses": {
+          "200": {
+            "description": "PDF file",
+            "content": {
+              "application/pdf": {
+                "schema": { "type": "string", "format": "binary" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" },
+          "403": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
     "/api/upload": {
       "post": {
         "tags": ["Uploads"],
@@ -1387,6 +1697,76 @@ const openAPISpecJSON = `{
           "error": { "type": "string" },
           "message": { "type": "string" },
           "details": { "type": "string" }
+        }
+      },
+      "CVUpsertRequest": {
+        "type": "object",
+        "properties": {
+          "first_name": { "type": "string" },
+          "last_name": { "type": "string" },
+          "profile_text": { "type": "string", "description": "Max ~80 words" },
+          "value_proposition": { "type": "string", "description": "Max ~150 words" },
+          "gender": { "type": "string" },
+          "nationality": { "type": "string" },
+          "date_of_birth": { "type": "string", "format": "date", "description": "YYYY-MM-DD" },
+          "professional_skills": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ProfessionalSkill" }
+          },
+          "qualifications": { "type": "array", "items": { "type": "string" } },
+          "computer_skills": { "type": "array", "items": { "type": "string" } },
+          "professional_memberships": { "type": "array", "items": { "type": "string" } },
+          "languages": { "type": "array", "items": { "type": "string" } },
+          "experience": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/CVExperience" }
+          }
+        }
+      },
+      "CVProfile": {
+        "allOf": [
+          { "$ref": "#/components/schemas/CVUpsertRequest" },
+          {
+            "type": "object",
+            "properties": {
+              "id": { "type": "integer" },
+              "user_id": { "type": "integer" },
+              "profile_photo_url": { "type": "string", "format": "uri" },
+              "created_at": { "type": "string", "format": "date-time" },
+              "updated_at": { "type": "string", "format": "date-time" }
+            }
+          }
+        ]
+      },
+      "CVProfileSummary": {
+        "type": "object",
+        "properties": {
+          "user_id": { "type": "integer" },
+          "first_name": { "type": "string" },
+          "last_name": { "type": "string" },
+          "professional_skills": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ProfessionalSkill" }
+          },
+          "qualifications": { "type": "array", "items": { "type": "string" } },
+          "updated_at": { "type": "string", "format": "date-time" }
+        }
+      },
+      "ProfessionalSkill": {
+        "type": "object",
+        "properties": {
+          "skill": { "type": "string", "example": "Project Management" },
+          "details": { "type": "array", "items": { "type": "string" }, "example": ["PMP certified", "Agile"] }
+        }
+      },
+      "CVExperience": {
+        "type": "object",
+        "properties": {
+          "company": { "type": "string" },
+          "position": { "type": "string" },
+          "period_start": { "type": "string", "description": "YYYY-MM", "example": "2018-03" },
+          "period_end": { "type": "string", "description": "YYYY-MM or empty for present", "example": "2024-01" },
+          "scope_of_work": { "type": "array", "items": { "type": "string" } }
         }
       },
       "FaceRegistrationRequiredResponse": {

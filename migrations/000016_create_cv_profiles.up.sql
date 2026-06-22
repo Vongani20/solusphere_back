@@ -1,0 +1,22 @@
+CREATE TABLE IF NOT EXISTS cv_profiles (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL UNIQUE,
+    first_name VARCHAR(100),
+    last_name VARCHAR(100),
+    profile_photo_url VARCHAR(500),
+    profile_text TEXT,
+    value_proposition TEXT,
+    gender VARCHAR(50),
+    nationality VARCHAR(100),
+    date_of_birth DATE,
+    professional_skills JSON,
+    qualifications JSON,
+    computer_skills JSON,
+    professional_memberships JSON,
+    languages JSON,
+    experience JSON,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_cv_profiles_user_id (user_id)
+);

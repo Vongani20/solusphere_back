@@ -18,6 +18,8 @@ require (
 	golang.org/x/crypto v0.45.0
 )
 
+require github.com/go-pdf/fpdf v0.9.0
+
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.3 // indirect

@@ -1,0 +1,275 @@
+package handlers
+
+import (
+	"fmt"
+	"io"
+	"net/http"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
+
+	"solusphere_backend/database"
+	"solusphere_backend/models"
+	"solusphere_backend/services"
+
+	"github.com/gin-gonic/gin"
+)
+
+var cvPDFService = services.NewCVPDFService()
+
+// GetCV returns the authenticated user's CV data.
+func GetCV(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	profile, err := models.GetCVProfileByUserID(database.DB, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load CV"})
+		return
+	}
+	if profile == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "CV not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"cv": profile})
+}
+
+// CreateOrUpdateCV upserts the authenticated user's CV data.
+func CreateOrUpdateCV(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	var profile models.CVProfile
+	if err := c.ShouldBindJSON(&profile); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body"})
+		return
+	}
+	profile.UserID = userID
+
+	// Preserve existing photo URL — only changed via /cv/photo
+	existing, _ := models.GetCVProfileByUserID(database.DB, userID)
+	if existing != nil {
+		profile.ProfilePhotoURL = existing.ProfilePhotoURL
+	}
+
+	if err := models.UpsertCVProfile(database.DB, &profile); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save CV"})
+		return
+	}
+
+	saved, err := models.GetCVProfileByUserID(database.DB, userID)
+	if err != nil || saved == nil {
+		c.JSON(http.StatusOK, gin.H{"message": "CV saved"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"cv": saved})
+}
+
+// UploadCVPhoto handles profile photo upload, stores in S3, and updates the CV record.
+func UploadCVPhoto(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	file, header, err := c.Request.FormFile("photo")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Photo file is required"})
+		return
+	}
+	defer file.Close()
+
+	ext := strings.ToLower(filepath.Ext(header.Filename))
+	if ext != ".jpg" && ext != ".jpeg" && ext != ".png" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Only JPG and PNG photos are accepted"})
+		return
+	}
+
+	const maxSize = 5 << 20 // 5 MB
+	if header.Size > maxSize {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Photo must be smaller than 5 MB"})
+		return
+	}
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read photo"})
+		return
+	}
+
+	contentType := "image/jpeg"
+	if ext == ".png" {
+		contentType = "image/png"
+	}
+
+	key := fmt.Sprintf("cv-photos/%d/%d%s", userID, time.Now().UnixNano(), ext)
+	if err := models.UploadToS3WithContentType(key, data, contentType); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload photo"})
+		return
+	}
+
+	photoURL := models.S3ObjectURL(key)
+
+	// Ensure a CV row exists before updating photo URL
+	existing, _ := models.GetCVProfileByUserID(database.DB, userID)
+	if existing == nil {
+		stub := &models.CVProfile{UserID: userID, ProfilePhotoURL: photoURL}
+		if err := models.UpsertCVProfile(database.DB, stub); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to initialise CV"})
+			return
+		}
+	} else {
+		if err := models.UpdateCVProfilePhotoURL(database.DB, userID, photoURL); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save photo URL"})
+			return
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"profile_photo_url": photoURL})
+}
+
+// DownloadCVPDF generates and streams a branded PDF for the authenticated user.
+func DownloadCVPDF(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	downloadCVForUser(c, userID)
+}
+
+// ---------- Admin handlers ----------
+
+// ListCVsByAdmin returns CV summaries with optional ?skill= and ?qualification= filters.
+func ListCVsByAdmin(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	if !requireAdmin(c, userID) {
+		return
+	}
+
+	skill := strings.TrimSpace(c.Query("skill"))
+	qualification := strings.TrimSpace(c.Query("qualification"))
+
+	summaries, err := models.ListCVProfiles(database.DB, skill, qualification)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load CV list"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"cvs": summaries, "count": len(summaries)})
+}
+
+// SearchCVs lets any authenticated user search the talent directory by skill or qualification.
+func SearchCVs(c *gin.Context) {
+	_, ok := currentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	skill := strings.TrimSpace(c.Query("skill"))
+	qualification := strings.TrimSpace(c.Query("qualification"))
+
+	if skill == "" && qualification == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Provide at least one filter: skill or qualification"})
+		return
+	}
+
+	results, err := models.ListCVProfiles(database.DB, skill, qualification)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Search failed"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"results": results, "count": len(results)})
+}
+
+// GetCVByAdmin returns a specific user's full CV data.
+func GetCVByAdmin(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	if !requireAdmin(c, userID) {
+		return
+	}
+
+	targetID, err := strconv.Atoi(c.Param("user_id"))
+	if err != nil || targetID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	profile, err := models.GetCVProfileByUserID(database.DB, targetID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load CV"})
+		return
+	}
+	if profile == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "CV not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"cv": profile})
+}
+
+// DownloadCVByAdmin generates and streams the PDF for any user.
+func DownloadCVByAdmin(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	if !requireAdmin(c, userID) {
+		return
+	}
+
+	targetID, err := strconv.Atoi(c.Param("user_id"))
+	if err != nil || targetID <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return
+	}
+	downloadCVForUser(c, targetID)
+}
+
+// ---------- Shared helper ----------
+
+func downloadCVForUser(c *gin.Context, userID int) {
+	profile, err := models.GetCVProfileByUserID(database.DB, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load CV"})
+		return
+	}
+	if profile == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "CV not found. Please fill in your CV details first."})
+		return
+	}
+
+	pdfBytes, err := cvPDFService.GeneratePDF(profile)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate PDF"})
+		return
+	}
+
+	firstName := strings.TrimSpace(profile.FirstName)
+	lastName := strings.TrimSpace(profile.LastName)
+	filename := "CV"
+	if firstName != "" || lastName != "" {
+		filename = fmt.Sprintf("CV_%s_%s", firstName, lastName)
+	}
+
+	c.Header("Content-Type", "application/pdf")
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.pdf"`, filename))
+	c.Header("Content-Length", strconv.Itoa(len(pdfBytes)))
+	c.Data(http.StatusOK, "application/pdf", pdfBytes)
+}

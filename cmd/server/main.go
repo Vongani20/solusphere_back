@@ -16,6 +16,7 @@ import (
 
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/joho/godotenv"
 )
 
 type AppSecrets struct {
@@ -39,6 +40,12 @@ type AppSecrets struct {
 }
 
 func main() {
+	// Load .env when present (local development). Silently ignored in production
+	// where env vars are injected by the container runtime.
+	if err := godotenv.Load(); err == nil {
+		log.Println("Loaded .env file")
+	}
+
 	var appSecrets *AppSecrets
 	var err error
 

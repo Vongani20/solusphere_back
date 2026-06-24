@@ -170,6 +170,21 @@ func UpdateCVProfilePhotoURL(db *sql.DB, userID int, photoURL string) error {
 	return err
 }
 
+// UpsertCVProfilePhotoURL inserts a minimal cv_profiles row for userID if one does not
+// yet exist, then sets profile_photo_url in either case.  This avoids passing empty
+// strings for DATE/NOT-NULL columns when the user uploads a photo before filling in
+// the rest of their CV.
+func UpsertCVProfilePhotoURL(db *sql.DB, userID int, photoURL string) error {
+	_, err := db.Exec(`
+		INSERT INTO cv_profiles (user_id, profile_photo_url)
+		VALUES (?, ?)
+		ON DUPLICATE KEY UPDATE
+		  profile_photo_url = VALUES(profile_photo_url),
+		  updated_at        = CURRENT_TIMESTAMP
+	`, userID, photoURL)
+	return err
+}
+
 // ListCVProfiles returns CV summaries with optional substring filters.
 // skill filters on professional_skills JSON; qualification filters on qualifications JSON.
 func ListCVProfiles(db *sql.DB, skill, qualification string) ([]CVProfileSummary, error) {

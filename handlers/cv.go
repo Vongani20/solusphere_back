@@ -53,6 +53,11 @@ func CreateOrUpdateCV(c *gin.Context) {
 	}
 	profile.UserID = userID
 
+	if errs := validateCVProfile(&profile); len(errs) > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "fields": errs})
+		return
+	}
+
 	// Preserve existing photo URL — only changed via /cv/photo
 	existing, _ := models.GetCVProfileByUserID(database.DB, userID)
 	if existing != nil {
@@ -70,6 +75,47 @@ func CreateOrUpdateCV(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"cv": saved})
+}
+
+// validateCVProfile returns a map of field name → error message for any missing required fields.
+func validateCVProfile(p *models.CVProfile) map[string]string {
+	errs := map[string]string{}
+
+	if strings.TrimSpace(p.FirstName) == "" {
+		errs["first_name"] = "First name is required"
+	}
+	if strings.TrimSpace(p.LastName) == "" {
+		errs["last_name"] = "Last name is required"
+	}
+	if strings.TrimSpace(p.Gender) == "" {
+		errs["gender"] = "Gender is required"
+	}
+	if strings.TrimSpace(p.Nationality) == "" {
+		errs["nationality"] = "Nationality is required"
+	}
+	if strings.TrimSpace(p.DateOfBirth) == "" {
+		errs["date_of_birth"] = "Date of birth is required"
+	}
+	if strings.TrimSpace(p.ProfileText) == "" {
+		errs["profile_text"] = "Profile is required"
+	}
+	if strings.TrimSpace(p.ValueProposition) == "" {
+		errs["value_proposition"] = "Value proposition is required"
+	}
+	if len(p.ProfessionalSkills) == 0 {
+		errs["professional_skills"] = "At least one professional skill is required"
+	}
+	if len(p.Qualifications) == 0 {
+		errs["qualifications"] = "At least one qualification is required"
+	}
+	if len(p.Languages) == 0 {
+		errs["languages"] = "At least one language is required"
+	}
+	if len(p.Experience) == 0 {
+		errs["experience"] = "At least one experience entry is required"
+	}
+
+	return errs
 }
 
 // UploadCVPhoto handles profile photo upload, stores in S3, and updates the CV record.
@@ -112,25 +158,15 @@ func UploadCVPhoto(c *gin.Context) {
 
 	key := fmt.Sprintf("cv-photos/%d/%d%s", userID, time.Now().UnixNano(), ext)
 	if err := models.UploadToS3WithContentType(key, data, contentType); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload photo"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload photo", "details": err.Error()})
 		return
 	}
 
 	photoURL := models.S3ObjectURL(key)
 
-	// Ensure a CV row exists before updating photo URL
-	existing, _ := models.GetCVProfileByUserID(database.DB, userID)
-	if existing == nil {
-		stub := &models.CVProfile{UserID: userID, ProfilePhotoURL: photoURL}
-		if err := models.UpsertCVProfile(database.DB, stub); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to initialise CV"})
-			return
-		}
-	} else {
-		if err := models.UpdateCVProfilePhotoURL(database.DB, userID, photoURL); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save photo URL"})
-			return
-		}
+	if err := models.UpsertCVProfilePhotoURL(database.DB, userID, photoURL); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save photo URL"})
+		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{"profile_photo_url": photoURL})

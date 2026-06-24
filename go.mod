@@ -20,6 +20,8 @@ require (
 
 require github.com/go-pdf/fpdf v0.9.0
 
+require github.com/joho/godotenv v1.5.1 // indirect
+
 require (
 	filippo.io/edwards25519 v1.2.0 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.3 // indirect

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net/url"
 	"os"
@@ -143,6 +144,39 @@ func UploadToS3WithContentType(key string, body []byte, contentType string) erro
 	}
 
 	return nil
+}
+
+// DownloadFromS3 fetches an object from the configured bucket using AWS credentials.
+func DownloadFromS3(key string) ([]byte, string, error) {
+	if S3Client == nil {
+		return nil, "", fmt.Errorf("S3 client not initialized")
+	}
+	if BucketName == "" {
+		return nil, "", fmt.Errorf("S3 bucket name is not configured")
+	}
+	if strings.TrimSpace(key) == "" {
+		return nil, "", fmt.Errorf("S3 key is required")
+	}
+
+	out, err := S3Client.GetObject(context.Background(), &s3.GetObjectInput{
+		Bucket: aws.String(BucketName),
+		Key:    aws.String(key),
+	})
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to download from S3: %w", err)
+	}
+	defer out.Body.Close()
+
+	data, err := io.ReadAll(out.Body)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to read S3 object body: %w", err)
+	}
+
+	contentType := ""
+	if out.ContentType != nil {
+		contentType = strings.ToLower(*out.ContentType)
+	}
+	return data, contentType, nil
 }
 
 func DeleteFromS3(key string) error {

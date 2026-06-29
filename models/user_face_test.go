@@ -44,3 +44,25 @@ func TestS3ObjectURLRoundTrip(t *testing.T) {
 		t.Fatalf("S3KeyFromObjectURL() = %q, want %q", got, key)
 	}
 }
+
+func TestS3CVPhotoURLRoundTrip(t *testing.T) {
+	oldBucket := BucketName
+	oldRegion := AWSRegionName
+	defer func() {
+		BucketName = oldBucket
+		AWSRegionName = oldRegion
+	}()
+
+	BucketName = "innovationform"
+	AWSRegionName = "eu-west-1"
+
+	key := "cv-photos/42/1710000000.jpg"
+	rawURL := S3ObjectURL(key)
+	got, ok := S3KeyFromObjectURL(rawURL)
+	if !ok {
+		t.Fatalf("expected CV photo URL to parse: %s", rawURL)
+	}
+	if got != key {
+		t.Fatalf("S3KeyFromObjectURL() = %q, want %q", got, key)
+	}
+}

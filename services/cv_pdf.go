@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -288,6 +289,7 @@ func (s *CVPDFService) drawPhoto(pdf *fpdf.Fpdf, x, y, w, h float64, photoURL st
 			pdf.Rect(x, y, w, h, "D")
 			return
 		}
+		log.Printf("CV PDF: failed to load profile photo %q: %v", photoURL, err)
 	}
 
 	pdf.SetDrawColor(200, 200, 200)
@@ -435,8 +437,16 @@ func setCV_Purple(pdf *fpdf.Fpdf) { pdf.SetTextColor(cvPurpleR, cvPurpleG, cvPur
 func setCV_Gray(pdf *fpdf.Fpdf)   { pdf.SetTextColor(100, 100, 100) }
 func setCV_Black(pdf *fpdf.Fpdf)  { pdf.SetTextColor(0, 0, 0) }
 
-func downloadImage(url string) ([]byte, string, error) {
-	resp, err := http.Get(url)
+func downloadImage(rawURL string) ([]byte, string, error) {
+	if key, ok := models.S3KeyFromObjectURL(rawURL); ok {
+		data, contentType, err := models.DownloadFromS3(key)
+		if err != nil {
+			return nil, "", err
+		}
+		return data, imageTypeFromSource(rawURL, contentType), nil
+	}
+
+	resp, err := http.Get(rawURL)
 	if err != nil {
 		return nil, "", err
 	}
@@ -448,13 +458,21 @@ func downloadImage(url string) ([]byte, string, error) {
 	if err != nil {
 		return nil, "", err
 	}
-	imgType := "JPEG"
-	ct := strings.ToLower(resp.Header.Get("Content-Type"))
-	urlLower := strings.ToLower(url)
-	if strings.Contains(ct, "png") || strings.HasSuffix(urlLower, ".png") {
-		imgType = "PNG"
+	return data, imageTypeFromSource(rawURL, strings.ToLower(resp.Header.Get("Content-Type"))), nil
+}
+
+func imageTypeFromSource(rawURL, contentType string) string {
+	if strings.Contains(contentType, "png") {
+		return "PNG"
 	}
-	return data, imgType, nil
+	if strings.Contains(contentType, "jpeg") || strings.Contains(contentType, "jpg") {
+		return "JPEG"
+	}
+	urlLower := strings.ToLower(rawURL)
+	if strings.HasSuffix(urlLower, ".png") {
+		return "PNG"
+	}
+	return "JPEG"
 }
 
 func formatCVDate(s string) string {

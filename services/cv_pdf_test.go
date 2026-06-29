@@ -44,3 +44,12 @@ func TestGenerateCVPDFMatchesTemplateBasics(t *testing.T) {
 		t.Fatalf("expected PDF output, got %d bytes", len(pdf))
 	}
 }
+
+func TestImageTypeFromSource(t *testing.T) {
+	if got := imageTypeFromSource("https://example.com/photo.png", ""); got != "PNG" {
+		t.Fatalf("got %q, want PNG", got)
+	}
+	if got := imageTypeFromSource("https://example.com/photo", "image/jpeg"); got != "JPEG" {
+		t.Fatalf("got %q, want JPEG", got)
+	}
+}

@@ -18,6 +18,7 @@ func EnsureChatAndCallSchema(db *sql.DB) error {
 	}{
 		{name: "direct message attachments", fn: ensureDirectMessageAttachmentColumns},
 		{name: "call sessions", fn: ensureCallSessionTables},
+		{name: "user presence", fn: ensureUserPresenceTable},
 	}
 
 	for _, step := range steps {
@@ -85,6 +86,22 @@ func ensureCallSessionTables(db *sql.DB) error {
 			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (call_id) REFERENCES call_sessions(id) ON DELETE CASCADE,
 			INDEX idx_call_ice_call_id (call_id, id)
+		)
+	`)
+	return err
+}
+
+func ensureUserPresenceTable(db *sql.DB) error {
+	if tableExists(db, "user_presence") {
+		return nil
+	}
+
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS user_presence (
+			user_id INT PRIMARY KEY,
+			last_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			INDEX idx_user_presence_last_seen (last_seen_at)
 		)
 	`)
 	return err

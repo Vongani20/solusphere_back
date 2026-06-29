@@ -458,8 +458,16 @@ func main() {
 
 		// Direct user chat routes
 		protected.GET("/chats", handlers.ListDirectConversations)
+		protected.GET("/chats/calls/incoming", handlers.ListIncomingCalls)
+		protected.GET("/chats/calls/:call_id", handlers.GetCall)
+		protected.POST("/chats/calls/:call_id/accept", handlers.AcceptCall)
+		protected.POST("/chats/calls/:call_id/reject", handlers.RejectCall)
+		protected.POST("/chats/calls/:call_id/end", handlers.EndCall)
+		protected.POST("/chats/calls/:call_id/candidates", handlers.AddCallCandidate)
+		protected.GET("/chats/calls/:call_id/candidates", handlers.ListCallCandidates)
 		protected.GET("/chats/:user_id/messages", handlers.ListDirectMessages)
 		protected.POST("/chats/:user_id/messages", handlers.SendDirectMessage)
+		protected.POST("/chats/:user_id/calls", handlers.StartCall)
 
 		// Admin event chat routes
 		admin := protected.Group("/admin")

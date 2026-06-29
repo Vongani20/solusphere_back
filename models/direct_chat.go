@@ -2,7 +2,14 @@ package models
 
 import (
 	"database/sql"
+	"strings"
 	"time"
+)
+
+const (
+	DirectMessageTypeText  = "text"
+	DirectMessageTypeImage = "image"
+	DirectMessageTypeVoice = "voice"
 )
 
 type ChatUser struct {
@@ -19,6 +26,9 @@ type DirectMessage struct {
 	ReceiverID       int        `json:"receiver_id"`
 	ReceiverUsername string     `json:"receiver_username"`
 	Message          string     `json:"message"`
+	MessageType      string     `json:"message_type"`
+	AttachmentURL    string     `json:"attachment_url,omitempty"`
+	AttachmentMIME   string     `json:"attachment_mime,omitempty"`
 	ReadAt           *time.Time `json:"read_at"`
 	CreatedAt        time.Time  `json:"created_at"`
 }
@@ -31,6 +41,46 @@ type DirectConversation struct {
 	LatestMessage   string    `json:"latest_message"`
 	LatestMessageAt time.Time `json:"latest_message_at"`
 	UnreadCount     int       `json:"unread_count"`
+}
+
+func directMessageSelectColumns() string {
+	return `
+		m.id, m.sender_id, sender.username, m.receiver_id, receiver.username,
+		COALESCE(m.message, ''), m.message_type, COALESCE(m.attachment_url, ''),
+		COALESCE(m.attachment_mime, ''), m.read_at, m.created_at
+	`
+}
+
+func scanDirectMessage(scanner interface {
+	Scan(dest ...any) error
+}) (*DirectMessage, error) {
+	message := &DirectMessage{}
+	if err := scanner.Scan(
+		&message.ID,
+		&message.SenderID,
+		&message.SenderUsername,
+		&message.ReceiverID,
+		&message.ReceiverUsername,
+		&message.Message,
+		&message.MessageType,
+		&message.AttachmentURL,
+		&message.AttachmentMIME,
+		&message.ReadAt,
+		&message.CreatedAt,
+	); err != nil {
+		return nil, err
+	}
+	presignDirectMessageAttachment(message)
+	return message, nil
+}
+
+func presignDirectMessageAttachment(message *DirectMessage) {
+	if message == nil {
+		return
+	}
+	if strings.TrimSpace(message.AttachmentURL) != "" {
+		message.AttachmentURL = ClientAccessiblePhotoURL(message.AttachmentURL)
+	}
 }
 
 func ListChatUsers(db *sql.DB, currentUserID int) ([]ChatUser, error) {
@@ -57,11 +107,20 @@ func ListChatUsers(db *sql.DB, currentUserID int) ([]ChatUser, error) {
 	return users, rows.Err()
 }
 
-func CreateDirectMessage(db *sql.DB, senderID, receiverID int, message string) (*DirectMessage, error) {
+func CreateDirectMessage(
+	db *sql.DB,
+	senderID, receiverID int,
+	messageType, message, attachmentURL, attachmentMIME string,
+) (*DirectMessage, error) {
+	messageType = strings.TrimSpace(messageType)
+	if messageType == "" {
+		messageType = DirectMessageTypeText
+	}
+
 	result, err := db.Exec(`
-		INSERT INTO direct_messages (sender_id, receiver_id, message, created_at)
-		VALUES (?, ?, ?, NOW())
-	`, senderID, receiverID, message)
+		INSERT INTO direct_messages (sender_id, receiver_id, message, message_type, attachment_url, attachment_mime, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, NOW())
+	`, senderID, receiverID, nullIfEmpty(message), messageType, nullIfEmpty(attachmentURL), nullIfEmpty(attachmentMIME))
 	if err != nil {
 		return nil, err
 	}
@@ -76,29 +135,14 @@ func CreateDirectMessage(db *sql.DB, senderID, receiverID int, message string) (
 
 func GetDirectMessageByID(db *sql.DB, messageID int) (*DirectMessage, error) {
 	row := db.QueryRow(`
-		SELECT m.id, m.sender_id, sender.username, m.receiver_id, receiver.username,
-		       m.message, m.read_at, m.created_at
+		SELECT `+directMessageSelectColumns()+`
 		FROM direct_messages m
 		INNER JOIN users sender ON sender.id = m.sender_id
 		INNER JOIN users receiver ON receiver.id = m.receiver_id
 		WHERE m.id = ?
 	`, messageID)
 
-	message := &DirectMessage{}
-	if err := row.Scan(
-		&message.ID,
-		&message.SenderID,
-		&message.SenderUsername,
-		&message.ReceiverID,
-		&message.ReceiverUsername,
-		&message.Message,
-		&message.ReadAt,
-		&message.CreatedAt,
-	); err != nil {
-		return nil, err
-	}
-
-	return message, nil
+	return scanDirectMessage(row)
 }
 
 func ListDirectMessages(db *sql.DB, currentUserID, otherUserID, limit int) ([]DirectMessage, error) {
@@ -107,8 +151,7 @@ func ListDirectMessages(db *sql.DB, currentUserID, otherUserID, limit int) ([]Di
 	}
 
 	rows, err := db.Query(`
-		SELECT m.id, m.sender_id, sender.username, m.receiver_id, receiver.username,
-		       m.message, m.read_at, m.created_at
+		SELECT `+directMessageSelectColumns()+`
 		FROM direct_messages m
 		INNER JOIN users sender ON sender.id = m.sender_id
 		INNER JOIN users receiver ON receiver.id = m.receiver_id
@@ -124,20 +167,11 @@ func ListDirectMessages(db *sql.DB, currentUserID, otherUserID, limit int) ([]Di
 
 	messages := make([]DirectMessage, 0)
 	for rows.Next() {
-		var message DirectMessage
-		if err := rows.Scan(
-			&message.ID,
-			&message.SenderID,
-			&message.SenderUsername,
-			&message.ReceiverID,
-			&message.ReceiverUsername,
-			&message.Message,
-			&message.ReadAt,
-			&message.CreatedAt,
-		); err != nil {
+		message, err := scanDirectMessage(rows)
+		if err != nil {
 			return nil, err
 		}
-		messages = append(messages, message)
+		messages = append(messages, *message)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -155,10 +189,20 @@ func MarkDirectMessagesRead(db *sql.DB, currentUserID, otherUserID int) error {
 	return err
 }
 
+func conversationPreviewExpr() string {
+	return `
+		CASE
+		    WHEN latest.message_type = 'image' THEN COALESCE(NULLIF(latest.message, ''), 'Photo')
+		    WHEN latest.message_type = 'voice' THEN COALESCE(NULLIF(latest.message, ''), 'Voice note')
+		    ELSE COALESCE(latest.message, '')
+		END
+	`
+}
+
 func ListDirectConversations(db *sql.DB, currentUserID int) ([]DirectConversation, error) {
 	rows, err := db.Query(`
 		SELECT other_user.id, other_user.username, other_user.email, other_user.role,
-		       latest.message, latest.created_at,
+		       `+conversationPreviewExpr()+`, latest.created_at,
 		       (
 		           SELECT COUNT(*)
 		           FROM direct_messages unread

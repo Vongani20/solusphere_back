@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/rekognition"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/sns"
+	"time"
 )
 
 var (
@@ -241,4 +242,52 @@ func escapeS3Key(key string) string {
 		parts[i] = url.PathEscape(part)
 	}
 	return strings.Join(parts, "/")
+}
+
+const defaultPresignExpiry = 12 * time.Hour
+
+// PresignObjectURL returns a time-limited HTTPS URL for reading a private S3 object.
+func PresignObjectURL(key string, expiry time.Duration) (string, error) {
+	if S3Client == nil {
+		return "", fmt.Errorf("S3 client not initialized")
+	}
+	if BucketName == "" {
+		return "", fmt.Errorf("S3 bucket name is not configured")
+	}
+	if strings.TrimSpace(key) == "" {
+		return "", fmt.Errorf("S3 key is required")
+	}
+	if expiry <= 0 {
+		expiry = defaultPresignExpiry
+	}
+
+	presignClient := s3.NewPresignClient(S3Client)
+	result, err := presignClient.PresignGetObject(context.Background(), &s3.GetObjectInput{
+		Bucket: aws.String(BucketName),
+		Key:    aws.String(key),
+	}, s3.WithPresignExpires(expiry))
+	if err != nil {
+		return "", fmt.Errorf("failed to presign S3 object: %w", err)
+	}
+	return result.URL, nil
+}
+
+// ClientAccessiblePhotoURL converts stored private S3 URLs into browser-loadable presigned URLs.
+func ClientAccessiblePhotoURL(storedURL string) string {
+	storedURL = strings.TrimSpace(storedURL)
+	if storedURL == "" {
+		return ""
+	}
+
+	key, ok := S3KeyFromObjectURL(storedURL)
+	if !ok {
+		return storedURL
+	}
+
+	signed, err := PresignObjectURL(key, defaultPresignExpiry)
+	if err != nil {
+		log.Printf("presign CV photo failed for key %s: %v", key, err)
+		return storedURL
+	}
+	return signed
 }

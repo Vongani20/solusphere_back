@@ -36,6 +36,7 @@ func GetCV(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "CV not found"})
 		return
 	}
+	enrichCVPhotoURL(profile)
 	c.JSON(http.StatusOK, gin.H{"cv": profile})
 }
 
@@ -77,6 +78,7 @@ func CreateOrUpdateCV(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"message": "CV saved"})
 		return
 	}
+	enrichCVPhotoURL(saved)
 	c.JSON(http.StatusOK, gin.H{"cv": saved})
 }
 
@@ -199,7 +201,7 @@ func UploadCVPhoto(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"profile_photo_url": photoURL})
+	c.JSON(http.StatusOK, gin.H{"profile_photo_url": models.ClientAccessiblePhotoURL(photoURL)})
 }
 
 // DownloadCVPDF generates and streams a branded PDF for the authenticated user.
@@ -284,6 +286,7 @@ func GetCVByAdmin(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "CV not found"})
 		return
 	}
+	enrichCVPhotoURL(profile)
 	c.JSON(http.StatusOK, gin.H{"cv": profile})
 }
 
@@ -350,4 +353,11 @@ func parseCVSearchOptions(c *gin.Context) models.CVSearchOptions {
 		Query:         strings.TrimSpace(c.Query("q")),
 		Match:         match,
 	}
+}
+
+func enrichCVPhotoURL(profile *models.CVProfile) {
+	if profile == nil {
+		return
+	}
+	profile.ProfilePhotoURL = models.ClientAccessiblePhotoURL(profile.ProfilePhotoURL)
 }

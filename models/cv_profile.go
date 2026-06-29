@@ -45,6 +45,7 @@ type CVProfileSummary struct {
 	UserID             int                 `json:"user_id"`
 	FirstName          string              `json:"first_name"`
 	LastName           string              `json:"last_name"`
+	ProfilePhotoURL    string              `json:"profile_photo_url,omitempty"`
 	ProfessionalSkills []ProfessionalSkill `json:"professional_skills"`
 	Qualifications     []string            `json:"qualifications"`
 	UpdatedAt          time.Time           `json:"updated_at"`
@@ -275,7 +276,7 @@ func UpsertCVProfilePhotoURL(db *sql.DB, userID int, photoURL string) error {
 
 // ListCVProfiles returns CV summaries with optional advanced text filters.
 func ListCVProfiles(db *sql.DB, opts CVSearchOptions) ([]CVProfileSummary, error) {
-	query := `SELECT user_id, first_name, last_name, professional_skills, qualifications, updated_at
+	query := `SELECT user_id, first_name, last_name, profile_photo_url, professional_skills, qualifications, updated_at
 	          FROM cv_profiles
 	          WHERE TRIM(COALESCE(first_name, '')) <> ''
 	            AND TRIM(COALESCE(last_name, '')) <> ''`
@@ -326,8 +327,12 @@ func ListCVProfiles(db *sql.DB, opts CVSearchOptions) ([]CVProfileSummary, error
 	for rows.Next() {
 		var s CVProfileSummary
 		var skillsJSON, qualsJSON sql.NullString
-		if err := rows.Scan(&s.UserID, &s.FirstName, &s.LastName, &skillsJSON, &qualsJSON, &s.UpdatedAt); err != nil {
+		var photoURL sql.NullString
+		if err := rows.Scan(&s.UserID, &s.FirstName, &s.LastName, &photoURL, &skillsJSON, &qualsJSON, &s.UpdatedAt); err != nil {
 			return nil, err
+		}
+		if photoURL.Valid {
+			s.ProfilePhotoURL = ClientAccessiblePhotoURL(photoURL.String)
 		}
 		unmarshalJSON(skillsJSON, &s.ProfessionalSkills)
 		unmarshalJSON(qualsJSON, &s.Qualifications)

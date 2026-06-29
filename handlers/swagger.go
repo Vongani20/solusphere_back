@@ -1842,6 +1842,7 @@ const openAPISpecJSON = `{
           "user_id": { "type": "integer" },
           "first_name": { "type": "string" },
           "last_name": { "type": "string" },
+          "profile_photo_url": { "type": "string", "format": "uri" },
           "professional_skills": {
             "type": "array",
             "items": { "$ref": "#/components/schemas/ProfessionalSkill" }

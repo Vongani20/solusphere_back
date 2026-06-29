@@ -3,6 +3,7 @@ package models
 import (
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -49,13 +50,89 @@ type CVProfileSummary struct {
 	UpdatedAt          time.Time           `json:"updated_at"`
 }
 
+// SanitizeCVProfile trims fields and removes empty list entries before validation/persistence.
+func SanitizeCVProfile(p *CVProfile) {
+	p.FirstName = strings.TrimSpace(p.FirstName)
+	p.LastName = strings.TrimSpace(p.LastName)
+	p.ProfileText = strings.TrimSpace(p.ProfileText)
+	p.ValueProposition = strings.TrimSpace(p.ValueProposition)
+	p.Gender = strings.TrimSpace(p.Gender)
+	p.Nationality = strings.TrimSpace(p.Nationality)
+	p.DateOfBirth = NormalizeDateOfBirth(p.DateOfBirth)
+
+	p.Qualifications = filterNonEmptyStrings(p.Qualifications)
+	p.ComputerSkills = filterNonEmptyStrings(p.ComputerSkills)
+	p.ProfessionalMemberships = filterNonEmptyStrings(p.ProfessionalMemberships)
+	p.Languages = filterNonEmptyStrings(p.Languages)
+
+	var skills []ProfessionalSkill
+	for _, s := range p.ProfessionalSkills {
+		s.Skill = strings.TrimSpace(s.Skill)
+		s.Details = filterNonEmptyStrings(s.Details)
+		if s.Skill != "" || len(s.Details) > 0 {
+			skills = append(skills, s)
+		}
+	}
+	p.ProfessionalSkills = skills
+
+	var experience []CVExperience
+	for _, e := range p.Experience {
+		e.Company = strings.TrimSpace(e.Company)
+		e.Position = strings.TrimSpace(e.Position)
+		e.PeriodStart = strings.TrimSpace(e.PeriodStart)
+		e.PeriodEnd = strings.TrimSpace(e.PeriodEnd)
+		e.ScopeOfWork = filterNonEmptyStrings(e.ScopeOfWork)
+		if e.Company != "" || e.Position != "" || e.PeriodStart != "" || e.PeriodEnd != "" || len(e.ScopeOfWork) > 0 {
+			experience = append(experience, e)
+		}
+	}
+	p.Experience = experience
+}
+
+// NormalizeDateOfBirth converts common frontend/API formats to YYYY-MM-DD for MySQL DATE.
+func NormalizeDateOfBirth(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	if len(raw) >= 10 && raw[4] == '-' && raw[7] == '-' {
+		return raw[:10]
+	}
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return t.Format("2006-01-02")
+	}
+	if t, err := time.Parse("2006-01-02T15:04:05", raw); err == nil {
+		return t.Format("2006-01-02")
+	}
+	return raw
+}
+
+func filterNonEmptyStrings(values []string) []string {
+	var out []string
+	for _, v := range values {
+		if trimmed := strings.TrimSpace(v); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
 func UpsertCVProfile(db *sql.DB, profile *CVProfile) error {
+	SanitizeCVProfile(profile)
+
 	skillsJSON, _ := json.Marshal(profile.ProfessionalSkills)
 	qualsJSON, _ := json.Marshal(profile.Qualifications)
 	compJSON, _ := json.Marshal(profile.ComputerSkills)
 	memJSON, _ := json.Marshal(profile.ProfessionalMemberships)
 	langsJSON, _ := json.Marshal(profile.Languages)
 	expJSON, _ := json.Marshal(profile.Experience)
+
+	var dob interface{}
+	if profile.DateOfBirth == "" {
+		dob = nil
+	} else {
+		dob = profile.DateOfBirth
+	}
 
 	query := `
 		INSERT INTO cv_profiles
@@ -89,7 +166,7 @@ func UpsertCVProfile(db *sql.DB, profile *CVProfile) error {
 		profile.ValueProposition,
 		profile.Gender,
 		profile.Nationality,
-		profile.DateOfBirth,
+		dob,
 		string(skillsJSON),
 		string(qualsJSON),
 		string(compJSON),

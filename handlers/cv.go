@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"path/filepath"
 	"strconv"
@@ -52,6 +53,7 @@ func CreateOrUpdateCV(c *gin.Context) {
 		return
 	}
 	profile.UserID = userID
+	models.SanitizeCVProfile(&profile)
 
 	if errs := validateCVProfile(&profile); len(errs) > 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Validation failed", "fields": errs})
@@ -65,7 +67,8 @@ func CreateOrUpdateCV(c *gin.Context) {
 	}
 
 	if err := models.UpsertCVProfile(database.DB, &profile); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save CV"})
+		log.Printf("CV save failed for user %d: %v", userID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save CV", "details": err.Error()})
 		return
 	}
 
@@ -114,42 +117,32 @@ func DeleteCV(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "CV deleted"})
 }
 
-// validateCVProfile returns a map of field name → error message for any missing required fields.
+// validateCVProfile checks the personal fields required by the CV builder wizard.
+// Skills, qualifications, languages, and experience may be saved incrementally while
+// the user moves through the multi-step form.
 func validateCVProfile(p *models.CVProfile) map[string]string {
 	errs := map[string]string{}
 
-	if strings.TrimSpace(p.FirstName) == "" {
+	if p.FirstName == "" {
 		errs["first_name"] = "First name is required"
 	}
-	if strings.TrimSpace(p.LastName) == "" {
+	if p.LastName == "" {
 		errs["last_name"] = "Last name is required"
 	}
-	if strings.TrimSpace(p.Gender) == "" {
+	if p.Gender == "" {
 		errs["gender"] = "Gender is required"
 	}
-	if strings.TrimSpace(p.Nationality) == "" {
+	if p.Nationality == "" {
 		errs["nationality"] = "Nationality is required"
 	}
-	if strings.TrimSpace(p.DateOfBirth) == "" {
+	if p.DateOfBirth == "" {
 		errs["date_of_birth"] = "Date of birth is required"
 	}
-	if strings.TrimSpace(p.ProfileText) == "" {
+	if p.ProfileText == "" {
 		errs["profile_text"] = "Profile is required"
 	}
-	if strings.TrimSpace(p.ValueProposition) == "" {
+	if p.ValueProposition == "" {
 		errs["value_proposition"] = "Value proposition is required"
-	}
-	if len(p.ProfessionalSkills) == 0 {
-		errs["professional_skills"] = "At least one professional skill is required"
-	}
-	if len(p.Qualifications) == 0 {
-		errs["qualifications"] = "At least one qualification is required"
-	}
-	if len(p.Languages) == 0 {
-		errs["languages"] = "At least one language is required"
-	}
-	if len(p.Experience) == 0 {
-		errs["experience"] = "At least one experience entry is required"
 	}
 
 	return errs

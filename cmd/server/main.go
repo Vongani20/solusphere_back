@@ -441,6 +441,8 @@ func main() {
 		protected.GET("/profile", handlers.Profile)
 		protected.PATCH("/auth/password", handlers.UpdatePassword)
 		protected.GET("/users", handlers.ListChatUsers)
+		protected.POST("/presence/heartbeat", handlers.TouchPresence)
+		protected.GET("/presence", handlers.ListUserPresence)
 		protected.GET("/consent", handlers.GetUserConsents)
 		protected.POST("/consent", handlers.SignUserConsent)
 

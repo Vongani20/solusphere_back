@@ -13,10 +13,12 @@ const (
 )
 
 type ChatUser struct {
-	ID       int    `json:"id"`
-	Username string `json:"username"`
-	Email    string `json:"email"`
-	Role     string `json:"role"`
+	ID         int        `json:"id"`
+	Username   string     `json:"username"`
+	Email      string     `json:"email"`
+	Role       string     `json:"role"`
+	IsOnline   bool       `json:"is_online"`
+	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
 }
 
 type DirectMessage struct {
@@ -34,13 +36,15 @@ type DirectMessage struct {
 }
 
 type DirectConversation struct {
-	UserID          int       `json:"user_id"`
-	Username        string    `json:"username"`
-	Email           string    `json:"email"`
-	Role            string    `json:"role"`
-	LatestMessage   string    `json:"latest_message"`
-	LatestMessageAt time.Time `json:"latest_message_at"`
-	UnreadCount     int       `json:"unread_count"`
+	UserID          int        `json:"user_id"`
+	Username        string     `json:"username"`
+	Email           string     `json:"email"`
+	Role            string     `json:"role"`
+	IsOnline        bool       `json:"is_online"`
+	LastSeenAt      *time.Time `json:"last_seen_at,omitempty"`
+	LatestMessage   string     `json:"latest_message"`
+	LatestMessageAt time.Time  `json:"latest_message_at"`
+	UnreadCount     int        `json:"unread_count"`
 }
 
 func directMessageSelectColumns() string {
@@ -85,10 +89,12 @@ func presignDirectMessageAttachment(message *DirectMessage) {
 
 func ListChatUsers(db *sql.DB, currentUserID int) ([]ChatUser, error) {
 	rows, err := db.Query(`
-		SELECT id, username, email, role
-		FROM users
-		WHERE id <> ?
-		ORDER BY username ASC
+		SELECT u.id, u.username, u.email, u.role,
+		       `+presenceSelectExpr("p")+`
+		FROM users u
+		LEFT JOIN user_presence p ON p.user_id = u.id
+		WHERE u.id <> ?
+		ORDER BY is_online DESC, u.username ASC
 	`, currentUserID)
 	if err != nil {
 		return nil, err
@@ -98,9 +104,12 @@ func ListChatUsers(db *sql.DB, currentUserID int) ([]ChatUser, error) {
 	users := make([]ChatUser, 0)
 	for rows.Next() {
 		var user ChatUser
-		if err := rows.Scan(&user.ID, &user.Username, &user.Email, &user.Role); err != nil {
+		var isOnlineRaw int
+		var lastSeen sql.NullTime
+		if err := rows.Scan(&user.ID, &user.Username, &user.Email, &user.Role, &isOnlineRaw, &lastSeen); err != nil {
 			return nil, err
 		}
+		scanPresenceFields(&user.IsOnline, &user.LastSeenAt, isOnlineRaw, lastSeen)
 		users = append(users, user)
 	}
 
@@ -202,6 +211,7 @@ func conversationPreviewExpr() string {
 func ListDirectConversations(db *sql.DB, currentUserID int) ([]DirectConversation, error) {
 	rows, err := db.Query(`
 		SELECT other_user.id, other_user.username, other_user.email, other_user.role,
+		       `+presenceSelectExpr("presence")+`,
 		       `+conversationPreviewExpr()+`, latest.created_at,
 		       (
 		           SELECT COUNT(*)
@@ -223,6 +233,7 @@ func ListDirectConversations(db *sql.DB, currentUserID int) ([]DirectConversatio
 		) convo
 		INNER JOIN direct_messages latest ON latest.id = convo.latest_message_id
 		INNER JOIN users other_user ON other_user.id = convo.other_user_id
+		LEFT JOIN user_presence presence ON presence.user_id = other_user.id
 		ORDER BY latest.created_at DESC, latest.id DESC
 	`, currentUserID, currentUserID, currentUserID, currentUserID)
 	if err != nil {
@@ -233,17 +244,22 @@ func ListDirectConversations(db *sql.DB, currentUserID int) ([]DirectConversatio
 	conversations := make([]DirectConversation, 0)
 	for rows.Next() {
 		var conversation DirectConversation
+		var isOnlineRaw int
+		var lastSeen sql.NullTime
 		if err := rows.Scan(
 			&conversation.UserID,
 			&conversation.Username,
 			&conversation.Email,
 			&conversation.Role,
+			&isOnlineRaw,
+			&lastSeen,
 			&conversation.LatestMessage,
 			&conversation.LatestMessageAt,
 			&conversation.UnreadCount,
 		); err != nil {
 			return nil, err
 		}
+		scanPresenceFields(&conversation.IsOnline, &conversation.LastSeenAt, isOnlineRaw, lastSeen)
 		conversations = append(conversations, conversation)
 	}
 

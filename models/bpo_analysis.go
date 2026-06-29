@@ -3,6 +3,7 @@ package models
 import (
 	"database/sql"
 	"encoding/json"
+	"strings"
 	"time"
 )
 
@@ -121,8 +122,8 @@ func UpdateBPOAnalysis(db *sql.DB, analysis *BPOAnalysis) error {
 		analysis.FilePath,
 		analysis.FileSize,
 		analysis.MimeType,
-		analysis.ExtractedText,
-		analysis.AnalysisResult,
+		nullIfEmpty(analysis.ExtractedText),
+		nullJSONIfEmpty(analysis.AnalysisResult),
 		analysis.Status,
 		analysis.PageCount,
 		analysis.AnalysisType,
@@ -131,6 +132,93 @@ func UpdateBPOAnalysis(db *sql.DB, analysis *BPOAnalysis) error {
 		analysis.ID,
 	)
 	return err
+}
+
+func nullIfEmpty(value string) interface{} {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return value
+}
+
+func nullJSONIfEmpty(value string) interface{} {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return value
+}
+
+// ListBPOAnalysesByStatuses returns analyses in the given statuses (newest first).
+func ListBPOAnalysesByStatuses(db *sql.DB, statuses []string) ([]*BPOAnalysis, error) {
+	if len(statuses) == 0 {
+		return nil, nil
+	}
+
+	placeholders := strings.Repeat("?,", len(statuses))
+	placeholders = strings.TrimSuffix(placeholders, ",")
+
+	query := `SELECT id, filename, file_path, file_size, mime_type, extracted_text,
+                     analysis_result, status, page_count, analysis_type, confidence_score,
+                     created_at, updated_at
+              FROM bpo_analyses
+              WHERE status IN (` + placeholders + `)
+              ORDER BY created_at ASC`
+
+	args := make([]interface{}, len(statuses))
+	for i, status := range statuses {
+		args[i] = status
+	}
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	return scanBPOAnalysisRows(rows)
+}
+
+func scanBPOAnalysisRows(rows *sql.Rows) ([]*BPOAnalysis, error) {
+	var analyses []*BPOAnalysis
+	for rows.Next() {
+		analysis := &BPOAnalysis{}
+		var analysisResult sql.NullString
+		var extractedText sql.NullString
+		var updatedAt sql.NullTime
+
+		err := rows.Scan(
+			&analysis.ID,
+			&analysis.Filename,
+			&analysis.FilePath,
+			&analysis.FileSize,
+			&analysis.MimeType,
+			&extractedText,
+			&analysisResult,
+			&analysis.Status,
+			&analysis.PageCount,
+			&analysis.AnalysisType,
+			&analysis.ConfidenceScore,
+			&analysis.CreatedAt,
+			&updatedAt,
+		)
+		if err != nil {
+			return nil, err
+		}
+
+		if extractedText.Valid {
+			analysis.ExtractedText = extractedText.String
+		}
+		if analysisResult.Valid {
+			analysis.AnalysisResult = analysisResult.String
+		}
+		if updatedAt.Valid {
+			analysis.UpdatedAt = updatedAt.Time
+		}
+
+		analyses = append(analyses, analysis)
+	}
+
+	return analyses, rows.Err()
 }
 
 // ListBPOAnalyses retrieves paginated analyses with optional filters
@@ -179,43 +267,9 @@ func ListBPOAnalyses(db *sql.DB, page, limit int, status, analysisType string) (
 	}
 	defer rows.Close()
 
-	var analyses []*BPOAnalysis
-	for rows.Next() {
-		analysis := &BPOAnalysis{}
-		var analysisResult sql.NullString
-		var extractedText sql.NullString
-		var updatedAt sql.NullTime
-
-		err := rows.Scan(
-			&analysis.ID,
-			&analysis.Filename,
-			&analysis.FilePath,
-			&analysis.FileSize,
-			&analysis.MimeType,
-			&extractedText,
-			&analysisResult,
-			&analysis.Status,
-			&analysis.PageCount,
-			&analysis.AnalysisType,
-			&analysis.ConfidenceScore,
-			&analysis.CreatedAt,
-			&updatedAt,
-		)
-		if err != nil {
-			return nil, 0, err
-		}
-
-		if extractedText.Valid {
-			analysis.ExtractedText = extractedText.String
-		}
-		if analysisResult.Valid {
-			analysis.AnalysisResult = analysisResult.String
-		}
-		if updatedAt.Valid {
-			analysis.UpdatedAt = updatedAt.Time
-		}
-
-		analyses = append(analyses, analysis)
+	analyses, err := scanBPOAnalysisRows(rows)
+	if err != nil {
+		return nil, 0, err
 	}
 
 	return analyses, total, nil

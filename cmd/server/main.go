@@ -341,6 +341,7 @@ func main() {
 
 	// Initialize BPO Analysis Handler
 	bpoHandler := handlers.NewBPOAnalysisHandler(database.DB, pdfProcessor, uploadService)
+	go bpoHandler.ResumePendingAnalyses()
 
 	// Create Gin router
 	r := gin.Default()
@@ -492,6 +493,7 @@ func main() {
 		{
 			bpo.POST("/analyze-pdf", bpoHandler.UploadAndAnalyzePDF)
 			bpo.GET("/analysis/:id", bpoHandler.GetAnalysisResult)
+			bpo.POST("/analysis/:id/reprocess", bpoHandler.ReprocessAnalysis)
 			bpo.GET("/analyses", bpoHandler.ListAnalyses)
 			bpo.DELETE("/analysis/:id", bpoHandler.DeleteAnalysis)
 		}

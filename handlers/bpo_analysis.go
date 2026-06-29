@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -99,7 +100,7 @@ func (h *BPOAnalysisHandler) UploadAndAnalyzePDF(c *gin.Context) {
 	}
 
 	// Process analysis asynchronously
-	go h.processAnalysis(analysis.ID)
+	go h.runAnalysis(analysis.ID)
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":     "PDF uploaded and analysis started",
@@ -218,6 +219,76 @@ func (h *BPOAnalysisHandler) DeleteAnalysis(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"message": "Analysis deleted successfully",
 	})
+}
+
+// ReprocessAnalysis retries a stuck or failed analysis.
+func (h *BPOAnalysisHandler) ReprocessAnalysis(c *gin.Context) {
+	analysisID := c.Param("id")
+	if analysisID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Analysis ID is required"})
+		return
+	}
+
+	analysis, err := models.GetBPOAnalysisByID(h.db, analysisID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to find analysis"})
+		return
+	}
+	if analysis == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Analysis not found"})
+		return
+	}
+
+	if analysis.Status == models.StatusProcessing {
+		c.JSON(http.StatusConflict, gin.H{"error": "Analysis is already processing"})
+		return
+	}
+
+	analysis.Status = models.StatusPending
+	analysis.UpdatedAt = time.Now()
+	if err := models.UpdateBPOAnalysis(h.db, analysis); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to queue analysis for retry"})
+		return
+	}
+
+	go h.runAnalysis(analysisID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":     "Analysis reprocessing started",
+		"analysis_id": analysisID,
+		"status":      models.StatusPending,
+	})
+}
+
+// ResumePendingAnalyses requeues analyses left pending after a restart or failed update.
+func (h *BPOAnalysisHandler) ResumePendingAnalyses() {
+	analyses, err := models.ListBPOAnalysesByStatuses(h.db, []string{
+		models.StatusPending,
+		models.StatusProcessing,
+	})
+	if err != nil {
+		log.Printf("Failed to list pending BPO analyses: %v", err)
+		return
+	}
+	if len(analyses) == 0 {
+		return
+	}
+
+	log.Printf("Resuming %d pending BPO analyses", len(analyses))
+	for _, analysis := range analyses {
+		go h.runAnalysis(analysis.ID)
+	}
+}
+
+func (h *BPOAnalysisHandler) runAnalysis(analysisID string) {
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			log.Printf("Panic during BPO analysis %s: %v", analysisID, recovered)
+			h.updateAnalysisStatus(analysisID, models.StatusFailed, fmt.Sprintf("internal processing error: %v", recovered))
+		}
+	}()
+
+	h.processAnalysis(analysisID)
 }
 
 // processAnalysis handles the actual PDF processing and analysis

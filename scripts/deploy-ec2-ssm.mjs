@@ -24,6 +24,8 @@ fi
 echo "Using repo: $REPO"
 git config --global --add safe.directory "$REPO"
 cd "$REPO"
+docker system prune -af || true
+df -h /
 git fetch origin main
 git checkout main
 git pull --ff-only origin main
@@ -41,7 +43,8 @@ export COMPOSE_DOCKER_CLI_BUILD=0
 $COMPOSE build app
 $COMPOSE up -d app
 $COMPOSE ps
-curl -s http://localhost:2080/health
+sleep 8
+curl -sf http://localhost:2080/health || curl -s http://localhost:2080/health
 `;
 
 function run(command, args) {

@@ -77,6 +77,43 @@ func CreateOrUpdateCV(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"cv": saved})
 }
 
+// DeleteCV removes the authenticated user's CV and any stored profile photo.
+func DeleteCV(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	existing, err := models.GetCVProfileByUserID(database.DB, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load CV"})
+		return
+	}
+	if existing == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "CV not found"})
+		return
+	}
+
+	if existing.ProfilePhotoURL != "" {
+		if key, ok := models.S3KeyFromObjectURL(existing.ProfilePhotoURL); ok {
+			_ = models.DeleteFromS3(key)
+		}
+	}
+
+	deleted, err := models.DeleteCVProfileByUserID(database.DB, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete CV"})
+		return
+	}
+	if !deleted {
+		c.JSON(http.StatusNotFound, gin.H{"error": "CV not found"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "CV deleted"})
+}
+
 // validateCVProfile returns a map of field name → error message for any missing required fields.
 func validateCVProfile(p *models.CVProfile) map[string]string {
 	errs := map[string]string{}

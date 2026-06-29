@@ -1144,8 +1144,8 @@ const openAPISpecJSON = `{
       },
       "patch": {
         "tags": ["CV Builder"],
-        "summary": "Partially update the current user's CV data",
-        "description": "Same handler as POST — send only the fields you want to change. Omitted fields are kept as-is.",
+        "summary": "Update the current user's CV data",
+        "description": "Same handler as POST — send the full CV payload (typically loaded via GET /api/cv, edited, then saved).",
         "security": [{ "BearerAuth": [] }],
         "requestBody": {
           "required": true,
@@ -1159,9 +1159,32 @@ const openAPISpecJSON = `{
           }
         },
         "responses": {
-          "200": { "$ref": "#/components/responses/Success" },
+          "200": {
+            "description": "Saved CV",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": { "cv": { "$ref": "#/components/schemas/CVProfile" } }
+                }
+              }
+            }
+          },
           "400": { "$ref": "#/components/responses/Error" },
           "401": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      },
+      "delete": {
+        "tags": ["CV Builder"],
+        "summary": "Delete the current user's CV",
+        "description": "Removes the CV record and any uploaded profile photo from storage.",
+        "security": [{ "BearerAuth": [] }],
+        "responses": {
+          "200": { "$ref": "#/components/responses/Success" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "404": { "$ref": "#/components/responses/Error" },
           "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
           "500": { "$ref": "#/components/responses/Error" }
         }

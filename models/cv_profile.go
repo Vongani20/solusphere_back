@@ -222,6 +222,18 @@ func ListCVProfiles(db *sql.DB, skill, qualification string) ([]CVProfileSummary
 	return summaries, nil
 }
 
+func DeleteCVProfileByUserID(db *sql.DB, userID int) (bool, error) {
+	result, err := db.Exec(`DELETE FROM cv_profiles WHERE user_id = ?`, userID)
+	if err != nil {
+		return false, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return rows > 0, nil
+}
+
 func unmarshalJSON(ns sql.NullString, dst interface{}) {
 	if ns.Valid && ns.String != "" && ns.String != "null" {
 		json.Unmarshal([]byte(ns.String), dst)

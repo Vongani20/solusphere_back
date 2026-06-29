@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -17,14 +16,30 @@ import (
 const (
 	cvPageW = 210.0
 	cvPageH = 297.0
-	cvML    = 12.0 // left margin
-	cvMR    = 12.0 // right margin
-	cvMT    = 10.0 // top margin
+	cvML    = 12.0
+	cvMR    = 12.0
+	cvMT    = 10.0
 	cvCol1X = cvML
 	cvCol1W = 63.0
 	cvGap   = 5.0
-	cvCol2X = cvCol1X + cvCol1W + cvGap // 80
-	cvCol2W = cvPageW - cvMR - cvCol2X  // 118
+	cvCol2X = cvCol1X + cvCol1W + cvGap
+	cvCol2W = cvPageW - cvMR - cvCol2X
+)
+
+// Brand colours aligned with the SoluGrowth CV template.
+const (
+	cvTealR   = 0
+	cvTealG   = 151
+	cvTealB   = 167
+	cvPurpleR = 75
+	cvPurpleG = 0
+	cvPurpleB = 130
+	cvIconR   = 51
+	cvIconG   = 102
+	cvIconB   = 153
+	cvSideR   = 236
+	cvSideG   = 236
+	cvSideB   = 236
 )
 
 // CVPDFService generates branded SoluGrowth CVs.
@@ -52,41 +67,33 @@ func (s *CVPDFService) GeneratePDF(profile *models.CVProfile) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// ---------- Page 1 ----------
-
 func (s *CVPDFService) drawPage1(pdf *fpdf.Fpdf, profile *models.CVProfile) {
-	// Logo / brand top-right
-	logoW, logoH := 40.0, 15.0
+	logoW, logoH := 52.0, 18.0
 	logoX := cvPageW - cvMR - logoW
 	s.drawBrandHeader(pdf, logoX, cvMT, logoW, logoH)
 
-	// Name block (left-aligned, beside logo)
 	pdf.SetXY(cvML, cvMT)
-	pdf.SetFont("Helvetica", "B", 15)
-	setCV_Blue(pdf)
+	pdf.SetFont("Helvetica", "B", 17)
+	setCV_Purple(pdf)
 	name := strings.TrimSpace(profile.FirstName + " " + profile.LastName)
 	if name == "" {
 		name = "[First Name] [Surname]"
 	}
 	availW := logoX - cvML - 2
-	pdf.CellFormat(availW, 7, name, "", 1, "L", false, 0, "")
+	pdf.CellFormat(availW, 8, name, "", 1, "L", false, 0, "")
 	pdf.SetX(cvML)
 	pdf.SetFont("Helvetica", "", 8)
-	setCV_Gray(pdf)
+	setCV_Teal(pdf)
 	pdf.CellFormat(availW, 5, "CURRICULUM VITAE", "", 1, "L", false, 0, "")
 	setCV_Black(pdf)
 
-	contentTopY := cvMT + 14
-
-	// ---- Left column ----
+	contentTopY := cvMT + 16
 	leftY := contentTopY
 
-	// Profile photo placeholder / actual photo
 	photoH := 52.0
 	s.drawPhoto(pdf, cvCol1X, leftY, cvCol1W, photoH, profile.ProfilePhotoURL)
-	leftY += photoH + 4
+	leftY += photoH + 5
 
-	// PROFILE section
 	pdf.SetXY(cvCol1X, leftY)
 	s.drawLeftHeading(pdf, "PROFILE", cvCol1W)
 	leftY = pdf.GetY() + 1
@@ -100,7 +107,6 @@ func (s *CVPDFService) drawPage1(pdf *fpdf.Fpdf, profile *models.CVProfile) {
 	pdf.MultiCell(cvCol1W, 4, profileText, "", "L", false)
 	leftY = pdf.GetY() + 5
 
-	// VALUE PROPOSITION section
 	pdf.SetXY(cvCol1X, leftY)
 	s.drawLeftHeading(pdf, "VALUE PROPOSITION", cvCol1W)
 	leftY = pdf.GetY() + 1
@@ -113,79 +119,52 @@ func (s *CVPDFService) drawPage1(pdf *fpdf.Fpdf, profile *models.CVProfile) {
 	}
 	pdf.MultiCell(cvCol1W, 4, vp, "", "L", false)
 
-	// ---- Right column (bordered box) ----
 	boxTop := contentTopY
 	footerY := cvPageH - 10.0
 	boxH := footerY - boxTop - 2
+	pdf.SetFillColor(cvSideR, cvSideG, cvSideB)
+	pdf.Rect(cvCol2X, boxTop, cvCol2W, boxH, "F")
 
-	pdf.SetDrawColor(180, 180, 180)
-	pdf.SetLineWidth(0.3)
-	pdf.Rect(cvCol2X, boxTop, cvCol2W, boxH, "D")
+	innerX := cvCol2X + 4
+	innerW := cvCol2W - 8
+	rightY := boxTop + 4
 
-	innerX := cvCol2X + 3
-	innerW := cvCol2W - 6
-	rightY := boxTop + 3
-
-	// Personal Details
-	rightY = s.drawRightHeading(pdf, "PERSONAL DETAILS", innerX, rightY, innerW)
+	rightY = s.drawRightHeading(pdf, "PERSONAL DETAILS", "P", innerX, rightY, innerW)
 	rightY = s.drawPersonalDetails(pdf, profile, innerX, rightY, innerW)
 	rightY += 3
 
-	// Professional Skills
-	rightY = s.drawRightHeading(pdf, "PROFESSIONAL SKILLS", innerX, rightY, innerW)
+	rightY = s.drawRightHeading(pdf, "PROFESSIONAL SKILLS", "S", innerX, rightY, innerW)
 	rightY = s.drawSkillsList(pdf, profile.ProfessionalSkills, innerX, rightY, innerW)
 	rightY += 3
 
-	// Qualifications
-	rightY = s.drawRightHeading(pdf, "QUALIFICATIONS AND TRAINING", innerX, rightY, innerW)
+	rightY = s.drawRightHeading(pdf, "QUALIFICATIONS AND TRAINING", "Q", innerX, rightY, innerW)
 	rightY = s.drawBulletList(pdf, profile.Qualifications, "[Insert qualification]", innerX, rightY, innerW)
 	rightY += 3
 
-	// Computer Skills
-	rightY = s.drawRightHeading(pdf, "COMPUTER SKILLS", innerX, rightY, innerW)
+	rightY = s.drawRightHeading(pdf, "COMPUTER SKILLS", "C", innerX, rightY, innerW)
 	rightY = s.drawBulletList(pdf, profile.ComputerSkills, "[Insert skills]", innerX, rightY, innerW)
 	rightY += 3
 
-	// Professional Membership
-	rightY = s.drawRightHeading(pdf, "PROFESSIONAL MEMBERSHIP", innerX, rightY, innerW)
-	mem := strings.Join(profile.ProfessionalMemberships, ", ")
-	if mem == "" {
-		mem = "[Insert memberships]"
-	}
-	pdf.SetXY(innerX, rightY)
-	pdf.SetFont("Helvetica", "", 7.5)
-	setCV_Black(pdf)
-	pdf.MultiCell(innerW, 4, mem, "", "L", false)
-	rightY = pdf.GetY() + 3
+	rightY = s.drawRightHeading(pdf, "PROFESSIONAL MEMBERSHIP", "M", innerX, rightY, innerW)
+	rightY = s.drawBulletList(pdf, profile.ProfessionalMemberships, "[Insert memberships]", innerX, rightY, innerW)
+	rightY += 3
 
-	// Languages
-	rightY = s.drawRightHeading(pdf, "LANGUAGES", innerX, rightY, innerW)
-	langs := strings.Join(profile.Languages, ", ")
-	if langs == "" {
-		langs = "[Insert language(s)]"
-	}
-	pdf.SetXY(innerX, rightY)
-	pdf.SetFont("Helvetica", "", 7.5)
-	setCV_Black(pdf)
-	pdf.MultiCell(innerW, 4, langs, "", "L", false)
+	rightY = s.drawRightHeading(pdf, "LANGUAGES", "L", innerX, rightY, innerW)
+	s.drawBulletList(pdf, profile.Languages, "[Insert language(s)]", innerX, rightY, innerW)
 
 	_ = rightY
 	s.drawFooter(pdf, 1, 2)
 }
 
-// ---------- Page 2 ----------
-
 func (s *CVPDFService) drawPage2(pdf *fpdf.Fpdf, profile *models.CVProfile) {
-	// Brand header top-right
-	logoW, logoH := 40.0, 15.0
+	logoW, logoH := 52.0, 18.0
 	logoX := cvPageW - cvMR - logoW
 	s.drawBrandHeader(pdf, logoX, cvMT, logoW, logoH)
 
-	// EXPERIENCE heading
 	y := cvMT
 	pdf.SetXY(cvML, y)
 	pdf.SetFont("Helvetica", "B", 11)
-	setCV_Blue(pdf)
+	setCV_Teal(pdf)
 	pdf.CellFormat(180, 7, "EXPERIENCE", "", 1, "L", false, 0, "")
 	y += 9
 	setCV_Black(pdf)
@@ -195,58 +174,76 @@ func (s *CVPDFService) drawPage2(pdf *fpdf.Fpdf, profile *models.CVProfile) {
 		pdf.SetFont("Helvetica", "", 8)
 		setCV_Gray(pdf)
 		pdf.CellFormat(180, 5, "[No experience entries added yet]", "", 1, "L", false, 0, "")
+		setCV_Black(pdf)
 	}
 
-	for _, exp := range profile.Experience {
+	for i, exp := range profile.Experience {
 		if y > 268 {
 			break
 		}
 
-		// Company row
+		company := exp.Company
+		if company == "" {
+			company = "[Insert company]"
+		}
+		position := exp.Position
+		if position == "" {
+			position = "[Insert position]"
+		}
+		period := formatCVPeriod(exp.PeriodStart, exp.PeriodEnd)
+		if period == "" {
+			period = "[Month yyyy - Month yyyy]"
+		}
+
 		pdf.SetXY(cvML, y)
 		pdf.SetFont("Helvetica", "B", 8.5)
-		setCV_Black(pdf)
 		pdf.CellFormat(28, 5, "Company:", "", 0, "L", false, 0, "")
-		pdf.SetFont("Helvetica", "B", 8.5)
-		pdf.CellFormat(152, 5, exp.Company, "", 1, "L", false, 0, "")
+		pdf.CellFormat(152, 5, company, "", 1, "L", false, 0, "")
 		y += 5
 
-		// Position row
 		pdf.SetXY(cvML, y)
-		pdf.SetFont("Helvetica", "B", 8.5)
 		pdf.CellFormat(28, 5, "Position:", "", 0, "L", false, 0, "")
-		pdf.CellFormat(152, 5, exp.Position, "", 1, "L", false, 0, "")
+		pdf.CellFormat(152, 5, position, "", 1, "L", false, 0, "")
 		y += 5
 
-		// Period row
 		pdf.SetXY(cvML, y)
 		pdf.SetFont("Helvetica", "", 8.5)
 		pdf.CellFormat(28, 5, "Period:", "", 0, "L", false, 0, "")
-		pdf.CellFormat(152, 5, formatCVPeriod(exp.PeriodStart, exp.PeriodEnd), "", 1, "L", false, 0, "")
+		pdf.CellFormat(152, 5, period, "", 1, "L", false, 0, "")
 		y += 5
 
-		// Scope of work
-		if len(exp.ScopeOfWork) > 0 {
-			pdf.SetXY(cvML, y)
-			pdf.SetFont("Helvetica", "B", 8.5)
-			setCV_Blue(pdf)
-			pdf.CellFormat(180, 5, "Scope of work:", "", 1, "L", false, 0, "")
-			y += 5
-			setCV_Black(pdf)
-			for _, scope := range exp.ScopeOfWork {
-				if y > 270 {
-					break
-				}
-				pdf.SetXY(cvML+4, y)
-				pdf.SetFont("Helvetica", "", 8)
-				pdf.MultiCell(176-4, 4.5, "- "+scope, "", "L", false)
-				y = pdf.GetY()
-			}
+		scopes := exp.ScopeOfWork
+		if len(scopes) == 0 {
+			scopes = []string{"[Insert concise points that describe what the user did in the role]"}
 		}
-		y += 6
+
+		pdf.SetXY(cvML, y)
+		pdf.SetFont("Helvetica", "B", 8.5)
+		setCV_Teal(pdf)
+		pdf.CellFormat(180, 5, "Scope of work:", "", 1, "L", false, 0, "")
+		y += 5
+		setCV_Black(pdf)
+		for _, scope := range scopes {
+			if y > 270 {
+				break
+			}
+			pdf.SetXY(cvML+4, y)
+			pdf.SetFont("Helvetica", "", 8)
+			pdf.MultiCell(176-4, 4.5, "- "+scope, "", "L", false)
+			y = pdf.GetY()
+		}
+
+		if i < len(profile.Experience)-1 {
+			y += 2
+			pdf.SetDrawColor(180, 180, 180)
+			pdf.SetLineWidth(0.2)
+			pdf.Line(cvML, y, cvPageW-cvMR, y)
+			y += 4
+		} else {
+			y += 6
+		}
 	}
 
-	// Horizontal rule
 	pdf.SetDrawColor(0, 0, 0)
 	pdf.SetLineWidth(0.3)
 	pdf.Line(cvML, 285, cvPageW-cvMR, 285)
@@ -254,18 +251,17 @@ func (s *CVPDFService) drawPage2(pdf *fpdf.Fpdf, profile *models.CVProfile) {
 	s.drawFooter(pdf, 2, 2)
 }
 
-// ---------- Drawing helpers ----------
-
 func (s *CVPDFService) drawBrandHeader(pdf *fpdf.Fpdf, x, y, w, h float64) {
-	logoPath := "assets/solugrowth_logo.png"
-	if _, err := os.Stat(logoPath); err == nil {
+	if len(soluGrowthLogoPNG) > 0 {
 		opts := fpdf.ImageOptions{ImageType: "PNG", ReadDpi: false}
-		pdf.ImageOptions(logoPath, x, y, w, h, false, opts, 0, "")
+		name := fmt.Sprintf("solugrowth-logo-%d", time.Now().UnixNano())
+		pdf.RegisterImageOptionsReader(name, opts, bytes.NewReader(soluGrowthLogoPNG))
+		pdf.ImageOptions(name, x, y, w, h, false, opts, 0, "")
 		return
 	}
-	// Text fallback
-	pdf.SetFont("Helvetica", "B", 9)
-	setCV_Blue(pdf)
+
+	pdf.SetFont("Helvetica", "B", 10)
+	setCV_Teal(pdf)
 	pdf.SetXY(x, y+2)
 	pdf.CellFormat(w, 5, "SoluGrowth", "", 1, "R", false, 0, "")
 	pdf.SetX(x)
@@ -276,6 +272,10 @@ func (s *CVPDFService) drawBrandHeader(pdf *fpdf.Fpdf, x, y, w, h float64) {
 }
 
 func (s *CVPDFService) drawPhoto(pdf *fpdf.Fpdf, x, y, w, h float64, photoURL string) {
+	shadowOffset := 1.5
+	pdf.SetFillColor(210, 210, 210)
+	pdf.Rect(x+shadowOffset, y+shadowOffset, w, h, "F")
+
 	if photoURL != "" {
 		imgData, imgType, err := downloadImage(photoURL)
 		if err == nil {
@@ -283,33 +283,45 @@ func (s *CVPDFService) drawPhoto(pdf *fpdf.Fpdf, x, y, w, h float64, photoURL st
 			opts := fpdf.ImageOptions{ImageType: imgType}
 			pdf.RegisterImageOptionsReader(name, opts, bytes.NewReader(imgData))
 			pdf.ImageOptions(name, x, y, w, h, false, opts, 0, "")
+			pdf.SetDrawColor(220, 220, 220)
+			pdf.SetLineWidth(0.2)
+			pdf.Rect(x, y, w, h, "D")
 			return
 		}
 	}
-	// Grey placeholder
+
 	pdf.SetDrawColor(200, 200, 200)
-	pdf.SetFillColor(235, 235, 235)
+	pdf.SetFillColor(245, 245, 245)
 	pdf.Rect(x, y, w, h, "FD")
 	pdf.SetFont("Helvetica", "", 7)
 	setCV_Gray(pdf)
 	pdf.SetXY(x, y+h/2-2)
-	pdf.CellFormat(w, 4, "Insert photo", "", 0, "C", false, 0, "")
+	pdf.CellFormat(w, 4, "Insert user's image", "", 0, "C", false, 0, "")
 	setCV_Black(pdf)
 	pdf.SetFillColor(255, 255, 255)
 }
 
 func (s *CVPDFService) drawLeftHeading(pdf *fpdf.Fpdf, title string, w float64) {
 	pdf.SetFont("Helvetica", "B", 9)
-	setCV_Blue(pdf)
+	setCV_Teal(pdf)
 	pdf.CellFormat(w, 5, title, "", 1, "L", false, 0, "")
 	setCV_Black(pdf)
 }
 
-func (s *CVPDFService) drawRightHeading(pdf *fpdf.Fpdf, title string, x, y, w float64) float64 {
-	pdf.SetXY(x, y)
+func (s *CVPDFService) drawRightHeading(pdf *fpdf.Fpdf, title, icon string, x, y, w float64) float64 {
+	iconSize := 4.5
+	pdf.SetFillColor(cvIconR, cvIconG, cvIconB)
+	pdf.Circle(x+iconSize/2, y+iconSize/2, iconSize/2, "F")
+	pdf.SetFont("Helvetica", "B", 5.5)
+	pdf.SetTextColor(255, 255, 255)
+	pdf.SetXY(x, y+0.6)
+	pdf.CellFormat(iconSize, iconSize, icon, "", 0, "C", false, 0, "")
+
+	textX := x + iconSize + 2
+	pdf.SetXY(textX, y)
 	pdf.SetFont("Helvetica", "B", 8)
-	setCV_Blue(pdf)
-	pdf.CellFormat(w, 5, title, "", 1, "L", false, 0, "")
+	setCV_Teal(pdf)
+	pdf.CellFormat(w-iconSize-2, 5, title, "", 1, "L", false, 0, "")
 	setCV_Black(pdf)
 	return y + 5
 }
@@ -358,12 +370,23 @@ func (s *CVPDFService) drawSkillsList(pdf *fpdf.Fpdf, skills []models.Profession
 		return y + lineH
 	}
 	for _, skill := range skills {
+		label := skill.Skill
+		if label == "" {
+			label = "[Insert skills]"
+		}
 		pdf.SetXY(x+2, y)
 		pdf.SetFont("Helvetica", "B", 7.5)
 		setCV_Black(pdf)
-		pdf.CellFormat(w-2, lineH, "- "+skill.Skill+":", "", 1, "L", false, 0, "")
+		pdf.CellFormat(w-2, lineH, "- "+label+":", "", 1, "L", false, 0, "")
 		y += lineH
-		for _, d := range skill.Details {
+		details := skill.Details
+		if len(details) == 0 {
+			details = []string{"[skill detail point if necessary]"}
+		}
+		for _, d := range details {
+			if strings.TrimSpace(d) == "" {
+				continue
+			}
 			pdf.SetXY(x+7, y)
 			pdf.SetFont("Helvetica", "", 7.5)
 			pdf.CellFormat(w-7, lineH, "* "+d, "", 1, "L", false, 0, "")
@@ -377,12 +400,19 @@ func (s *CVPDFService) drawBulletList(pdf *fpdf.Fpdf, items []string, placeholde
 	lineH := 4.0
 	pdf.SetFont("Helvetica", "", 7.5)
 	setCV_Black(pdf)
-	if len(items) == 0 {
+
+	var nonEmpty []string
+	for _, item := range items {
+		if trimmed := strings.TrimSpace(item); trimmed != "" {
+			nonEmpty = append(nonEmpty, trimmed)
+		}
+	}
+	if len(nonEmpty) == 0 {
 		pdf.SetXY(x+2, y)
 		pdf.CellFormat(w-2, lineH, "- "+placeholder, "", 1, "L", false, 0, "")
 		return y + lineH
 	}
-	for _, item := range items {
+	for _, item := range nonEmpty {
 		pdf.SetXY(x+2, y)
 		pdf.CellFormat(w-2, lineH, "- "+item, "", 1, "L", false, 0, "")
 		y += lineH
@@ -400,13 +430,10 @@ func (s *CVPDFService) drawFooter(pdf *fpdf.Fpdf, pageNum, total int) {
 	setCV_Black(pdf)
 }
 
-// ---------- Color helpers ----------
-
-func setCV_Blue(pdf *fpdf.Fpdf)  { pdf.SetTextColor(51, 102, 204) }
-func setCV_Gray(pdf *fpdf.Fpdf)  { pdf.SetTextColor(100, 100, 100) }
-func setCV_Black(pdf *fpdf.Fpdf) { pdf.SetTextColor(0, 0, 0) }
-
-// ---------- Utility ----------
+func setCV_Teal(pdf *fpdf.Fpdf)   { pdf.SetTextColor(cvTealR, cvTealG, cvTealB) }
+func setCV_Purple(pdf *fpdf.Fpdf) { pdf.SetTextColor(cvPurpleR, cvPurpleG, cvPurpleB) }
+func setCV_Gray(pdf *fpdf.Fpdf)   { pdf.SetTextColor(100, 100, 100) }
+func setCV_Black(pdf *fpdf.Fpdf)  { pdf.SetTextColor(0, 0, 0) }
 
 func downloadImage(url string) ([]byte, string, error) {
 	resp, err := http.Get(url)
@@ -431,6 +458,10 @@ func downloadImage(url string) ([]byte, string, error) {
 }
 
 func formatCVDate(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 10 {
+		s = s[:10]
+	}
 	t, err := time.Parse("2006-01-02", s)
 	if err != nil {
 		return s
@@ -440,8 +471,15 @@ func formatCVDate(s string) string {
 
 func formatCVPeriod(start, end string) string {
 	parse := func(s string) string {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return ""
+		}
 		if t, err := time.Parse("2006-01", s); err == nil {
 			return t.Format("January 2006")
+		}
+		if len(s) >= 10 {
+			s = s[:10]
 		}
 		if t, err := time.Parse("2006-01-02", s); err == nil {
 			return t.Format("January 2006")

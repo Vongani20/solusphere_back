@@ -126,11 +126,13 @@ func Login(c *gin.Context) {
 
 	user, err := models.GetUserByEmail(database.DB, email)
 	if err != nil {
+		recordPasswordLoginFailure(c, email, nil, "invalid email or password")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
 		return
 	}
 
 	if err := user.CheckPassword(req.Password); err != nil {
+		recordPasswordLoginFailure(c, email, user, "invalid email or password")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid email or password"})
 		return
 	}
@@ -158,6 +160,8 @@ func Login(c *gin.Context) {
 	if !faceStatus {
 		nextStep = "POST /api/face/register"
 	}
+
+	recordPasswordLoginSuccess(c, user)
 
 	c.JSON(http.StatusOK, gin.H{
 		"message":       "Login successful",

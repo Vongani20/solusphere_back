@@ -482,6 +482,7 @@ func main() {
 			admin.GET("/helpdesk/:ticket_id", handlers.GetHelpdeskTicketByAdmin)
 			admin.PATCH("/helpdesk/:ticket_id", handlers.UpdateHelpdeskTicketByAdmin)
 			admin.DELETE("/helpdesk/:ticket_id", handlers.DeleteHelpdeskTicketByAdmin)
+			admin.GET("/login-audit", handlers.ListLoginAuditLogsByAdmin)
 		}
 
 		// Chatbot routes
@@ -604,6 +605,7 @@ func main() {
 	log.Println("  GET  /api/admin/helpdesk/:ticket_id (admin)")
 	log.Println("  PATCH /api/admin/helpdesk/:ticket_id (admin)")
 	log.Println("  DELETE /api/admin/helpdesk/:ticket_id (admin)")
+	log.Println("  GET  /api/admin/login-audit (admin)")
 	log.Println("  POST /api/chatbot (requires auth)")
 	log.Println("  POST /api/chatbot/report (requires auth)")
 	log.Println("  POST /api/bpo/analyze-pdf (requires auth)")

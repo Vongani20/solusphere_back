@@ -45,6 +45,7 @@ func FaceLogin(rekogSvc *services.RekognitionService) gin.HandlerFunc {
 		resp, err := rekogSvc.SearchCollectionByImage(mainCollectionID, sourceBytes)
 		if err != nil {
 			log.Printf("❌ Failed to search face index: %v", err)
+			recordFaceLoginFailure(c, "face search failed")
 			c.JSON(http.StatusInternalServerError, gin.H{
 				"error":   "Failed to search face index",
 				"details": err.Error(),
@@ -54,6 +55,7 @@ func FaceLogin(rekogSvc *services.RekognitionService) gin.HandlerFunc {
 
 		if len(resp.FaceMatches) == 0 {
 			log.Printf("⚠️ No face matches found")
+			recordFaceLoginFailure(c, "face not recognized")
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Face not recognized"})
 			return
 		}
@@ -123,6 +125,7 @@ func FaceLogin(rekogSvc *services.RekognitionService) gin.HandlerFunc {
 			}
 
 			log.Printf("✅ Face login successful - Similarity: %.2f%%, UserID: %d", similarity, user.ID)
+			recordFaceLoginSuccess(c, user)
 			c.JSON(http.StatusOK, models.FaceLoginResponse{
 				Message:    "Face login successful",
 				Token:      token,
@@ -132,6 +135,7 @@ func FaceLogin(rekogSvc *services.RekognitionService) gin.HandlerFunc {
 			return
 		}
 
+		recordFaceLoginFailure(c, "face not recognized")
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Face not recognized"})
 	}
 }

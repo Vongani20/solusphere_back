@@ -898,6 +898,48 @@ const openAPISpecJSON = `{
         }
       }
     },
+    "/api/chatbot/report": {
+      "post": {
+        "tags": ["AI"],
+        "summary": "Generate a SIA research report as Word, Excel, or PowerPoint",
+        "description": "SIA researches the user's prompt (with web search enabled by default), structures the findings, and returns a downloadable Office file.",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/SIAReportRequest" },
+              "example": {
+                "prompt": "Research BPO market trends in South Africa for 2026",
+                "format": "powerpoint",
+                "web_search": true
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Generated report file",
+            "content": {
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
+                "schema": { "type": "string", "format": "binary" }
+              },
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                "schema": { "type": "string", "format": "binary" }
+              },
+              "application/vnd.openxmlformats-officedocument.presentationml.presentation": {
+                "schema": { "type": "string", "format": "binary" }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "503": { "$ref": "#/components/responses/Error" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
     "/api/bpo/analyze-pdf": {
       "post": {
         "tags": ["BPO Analysis"],
@@ -1695,6 +1737,25 @@ const openAPISpecJSON = `{
           "model": { "type": "string" },
           "web_search_enabled": { "type": "boolean" },
           "error": { "type": "string" }
+        }
+      },
+      "SIAReportRequest": {
+        "type": "object",
+        "required": ["prompt", "format"],
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "description": "Research topic or question for SIA to investigate and report on."
+          },
+          "format": {
+            "type": "string",
+            "enum": ["word", "excel", "powerpoint", "docx", "xlsx", "pptx"],
+            "description": "Output format for the generated report."
+          },
+          "web_search": {
+            "type": "boolean",
+            "description": "Defaults to true. Disable only when you want no public web lookup."
+          }
         }
       },
       "HealthResponse": {

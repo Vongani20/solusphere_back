@@ -481,8 +481,9 @@ func main() {
 			admin.DELETE("/helpdesk/:ticket_id", handlers.DeleteHelpdeskTicketByAdmin)
 		}
 
-		// Chatbot route
+		// Chatbot routes
 		protected.POST("/chatbot", handlers.ChatbotHandler())
+		protected.POST("/chatbot/report", handlers.SIAReportHandler())
 
 		// BPO Analysis routes
 		bpo := protected.Group("/bpo")
@@ -598,6 +599,7 @@ func main() {
 	log.Println("  PATCH /api/admin/helpdesk/:ticket_id (admin)")
 	log.Println("  DELETE /api/admin/helpdesk/:ticket_id (admin)")
 	log.Println("  POST /api/chatbot (requires auth)")
+	log.Println("  POST /api/chatbot/report (requires auth)")
 	log.Println("  POST /api/bpo/analyze-pdf (requires auth)")
 	log.Println("  GET  /api/cv (requires auth)")
 	log.Println("  POST /api/cv (requires auth)")

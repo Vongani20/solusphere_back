@@ -36,6 +36,8 @@ else
   echo "DOCKER_COMPOSE_NOT_FOUND"
   exit 1
 fi
+export DOCKER_BUILDKIT=0
+export COMPOSE_DOCKER_CLI_BUILD=0
 $COMPOSE build app
 $COMPOSE up -d app
 $COMPOSE ps

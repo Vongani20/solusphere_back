@@ -48,6 +48,9 @@ func CreateOrUpdateCV(c *gin.Context) {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
+	if !requireDocumentProcessingConsent(c, userID) {
+		return
+	}
 
 	var profile models.CVProfile
 	if err := c.ShouldBindJSON(&profile); err != nil {
@@ -221,6 +224,9 @@ func UploadCVPhoto(c *gin.Context) {
 	userID, ok := currentUserID(c)
 	if !ok {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	if !requireDocumentProcessingConsent(c, userID) {
 		return
 	}
 

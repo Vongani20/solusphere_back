@@ -50,6 +50,17 @@ type CVProfileSummary struct {
 	UpdatedAt          time.Time           `json:"updated_at"`
 }
 
+// CVSearchOptions controls talent directory filtering.
+type CVSearchOptions struct {
+	Skill         string
+	Qualification string
+	Query         string
+	Match         string // "all" (default) or "any"
+}
+
+// CVSearchMatchAny combines skill and qualification groups with OR instead of AND.
+const CVSearchMatchAny = "any"
+
 // SanitizeCVProfile trims fields and removes empty list entries before validation/persistence.
 func SanitizeCVProfile(p *CVProfile) {
 	p.FirstName = strings.TrimSpace(p.FirstName)
@@ -262,21 +273,47 @@ func UpsertCVProfilePhotoURL(db *sql.DB, userID int, photoURL string) error {
 	return err
 }
 
-// ListCVProfiles returns CV summaries with optional substring filters.
-// skill filters on professional_skills JSON; qualification filters on qualifications JSON.
-func ListCVProfiles(db *sql.DB, skill, qualification string) ([]CVProfileSummary, error) {
+// ListCVProfiles returns CV summaries with optional advanced text filters.
+func ListCVProfiles(db *sql.DB, opts CVSearchOptions) ([]CVProfileSummary, error) {
 	query := `SELECT user_id, first_name, last_name, professional_skills, qualifications, updated_at
-	          FROM cv_profiles WHERE 1=1`
+	          FROM cv_profiles
+	          WHERE TRIM(COALESCE(first_name, '')) <> ''
+	            AND TRIM(COALESCE(last_name, '')) <> ''`
 	args := []interface{}{}
 
-	if skill != "" {
-		query += " AND professional_skills LIKE ?"
-		args = append(args, "%"+skill+"%")
+	skillTerms := splitSearchTerms(opts.Skill)
+	qualTerms := splitSearchTerms(opts.Qualification)
+	queryTerms := splitSearchTerms(opts.Query)
+
+	skillClause, skillArgs := buildCVTermGroupClause(skillTerms)
+	qualClause, qualArgs := buildCVTermGroupClause(qualTerms)
+	queryClause, queryArgs := buildCVTermGroupClause(queryTerms)
+
+	groupClauses := make([]string, 0, 3)
+	groupArgs := make([]interface{}, 0)
+
+	if skillClause != "" {
+		groupClauses = append(groupClauses, skillClause)
+		groupArgs = append(groupArgs, skillArgs...)
 	}
-	if qualification != "" {
-		query += " AND qualifications LIKE ?"
-		args = append(args, "%"+qualification+"%")
+	if qualClause != "" {
+		groupClauses = append(groupClauses, qualClause)
+		groupArgs = append(groupArgs, qualArgs...)
 	}
+	if queryClause != "" {
+		groupClauses = append(groupClauses, queryClause)
+		groupArgs = append(groupArgs, queryArgs...)
+	}
+
+	if len(groupClauses) > 0 {
+		joiner := " AND "
+		if strings.EqualFold(strings.TrimSpace(opts.Match), CVSearchMatchAny) {
+			joiner = " OR "
+		}
+		query += " AND (" + strings.Join(groupClauses, joiner) + ")"
+		args = append(args, groupArgs...)
+	}
+
 	query += " ORDER BY updated_at DESC"
 
 	rows, err := db.Query(query, args...)
@@ -297,6 +334,68 @@ func ListCVProfiles(db *sql.DB, skill, qualification string) ([]CVProfileSummary
 		summaries = append(summaries, s)
 	}
 	return summaries, nil
+}
+
+func splitSearchTerms(raw string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil
+	}
+
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || r == '|'
+	})
+	terms := make([]string, 0, len(parts))
+	seen := make(map[string]struct{})
+	for _, part := range parts {
+		term := strings.TrimSpace(part)
+		if term == "" {
+			continue
+		}
+		key := strings.ToLower(term)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		terms = append(terms, term)
+	}
+	return terms
+}
+
+func cvSearchableColumns() []string {
+	return []string{
+		"first_name",
+		"last_name",
+		"profile_text",
+		"value_proposition",
+		"professional_skills",
+		"qualifications",
+		"computer_skills",
+		"languages",
+		"experience",
+	}
+}
+
+func buildCVTermGroupClause(terms []string) (string, []interface{}) {
+	if len(terms) == 0 {
+		return "", nil
+	}
+
+	columns := cvSearchableColumns()
+	termClauses := make([]string, 0, len(terms))
+	args := make([]interface{}, 0, len(terms)*len(columns))
+
+	for _, term := range terms {
+		pattern := "%" + term + "%"
+		columnClauses := make([]string, 0, len(columns))
+		for _, column := range columns {
+			columnClauses = append(columnClauses, column+" LIKE ?")
+			args = append(args, pattern)
+		}
+		termClauses = append(termClauses, "("+strings.Join(columnClauses, " OR ")+")")
+	}
+
+	return "(" + strings.Join(termClauses, " AND ") + ")", args
 }
 
 func DeleteCVProfileByUserID(db *sql.DB, userID int) (bool, error) {

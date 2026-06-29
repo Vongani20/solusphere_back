@@ -225,10 +225,7 @@ func ListCVsByAdmin(c *gin.Context) {
 		return
 	}
 
-	skill := strings.TrimSpace(c.Query("skill"))
-	qualification := strings.TrimSpace(c.Query("qualification"))
-
-	summaries, err := models.ListCVProfiles(database.DB, skill, qualification)
+	summaries, err := models.ListCVProfiles(database.DB, parseCVSearchOptions(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load CV list"})
 		return
@@ -246,13 +243,14 @@ func SearchCVs(c *gin.Context) {
 
 	skill := strings.TrimSpace(c.Query("skill"))
 	qualification := strings.TrimSpace(c.Query("qualification"))
+	queryText := strings.TrimSpace(c.Query("q"))
 
-	if skill == "" && qualification == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Provide at least one filter: skill or qualification"})
+	if skill == "" && qualification == "" && queryText == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Provide at least one filter: skill, qualification, or q"})
 		return
 	}
 
-	results, err := models.ListCVProfiles(database.DB, skill, qualification)
+	results, err := models.ListCVProfiles(database.DB, parseCVSearchOptions(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Search failed"})
 		return
@@ -338,4 +336,18 @@ func downloadCVForUser(c *gin.Context, userID int) {
 	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.pdf"`, filename))
 	c.Header("Content-Length", strconv.Itoa(len(pdfBytes)))
 	c.Data(http.StatusOK, "application/pdf", pdfBytes)
+}
+
+func parseCVSearchOptions(c *gin.Context) models.CVSearchOptions {
+	match := strings.ToLower(strings.TrimSpace(c.DefaultQuery("match", "all")))
+	if match != models.CVSearchMatchAny {
+		match = "all"
+	}
+
+	return models.CVSearchOptions{
+		Skill:         strings.TrimSpace(c.Query("skill")),
+		Qualification: strings.TrimSpace(c.Query("qualification")),
+		Query:         strings.TrimSpace(c.Query("q")),
+		Match:         match,
+	}
 }

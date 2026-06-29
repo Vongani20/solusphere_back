@@ -1348,22 +1348,36 @@ const openAPISpecJSON = `{
       "get": {
         "tags": ["CV Builder", "Admin"],
         "summary": "List all CV profiles (admin) with optional filters",
-        "description": "Returns all CVs by default. Use 'skill' or 'qualification' query params to narrow results. Case-insensitive substring match on JSON data.",
+        "description": "Returns completed CVs (with name) by default. Advanced search scans skills, qualifications, computer skills, languages, experience, profile text, and names. Use match=all (default) or match=any to combine filters.",
         "security": [{ "BearerAuth": [] }],
         "parameters": [
           {
             "name": "skill",
             "in": "query",
             "required": false,
-            "description": "Filter by skill substring (e.g. 'Python', 'SAP')",
-            "schema": { "type": "string", "example": "SAP" }
+            "description": "Skill keywords (comma-separated). Searches all CV text fields.",
+            "schema": { "type": "string", "example": "Python, SQL" }
           },
           {
             "name": "qualification",
             "in": "query",
             "required": false,
-            "description": "Filter by qualification substring (e.g. 'BCom', 'MBA')",
-            "schema": { "type": "string", "example": "BCom" }
+            "description": "Qualification keywords (comma-separated). Searches all CV text fields.",
+            "schema": { "type": "string", "example": "BSc, MBA" }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "description": "General keyword search across all CV text fields.",
+            "schema": { "type": "string", "example": "project manager" }
+          },
+          {
+            "name": "match",
+            "in": "query",
+            "required": false,
+            "description": "How to combine skill, qualification, and q filters.",
+            "schema": { "type": "string", "enum": ["all", "any"], "default": "all" }
           }
         ],
         "responses": {

@@ -24,7 +24,7 @@ type startCallRequest struct {
 
 type acceptCallRequest struct {
 	Answer struct {
-		Type string `json:"type" binding:"required"`
+		Type string `json:"type"`
 		SDP  string `json:"sdp" binding:"required"`
 	} `json:"answer" binding:"required"`
 }
@@ -68,7 +68,7 @@ func StartCall(c *gin.Context) {
 		return
 	}
 
-	offerSDP := strings.TrimSpace(req.Offer.SDP)
+	offerSDP := normalizeSDP(strings.TrimSpace(req.Offer.SDP))
 	if offerSDP == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Offer SDP is required"})
 		return
@@ -152,7 +152,7 @@ func AcceptCall(c *gin.Context) {
 		return
 	}
 
-	answerSDP := strings.TrimSpace(req.Answer.SDP)
+	answerSDP := normalizeSDP(strings.TrimSpace(req.Answer.SDP))
 	if answerSDP == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Answer SDP is required"})
 		return
@@ -160,10 +160,12 @@ func AcceptCall(c *gin.Context) {
 
 	updated, err := models.AcceptCallSession(database.DB, call.ID, userID, answerSDP)
 	if err != nil {
+		log.Printf("AcceptCall failed call=%s callee=%d: %v", call.ID, userID, err)
 		c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
 		return
 	}
 
+	log.Printf("AcceptCall ok call=%s callee=%d", call.ID, userID)
 	c.JSON(http.StatusOK, gin.H{"call": sanitizeCallForUser(updated, userID)})
 }
 
@@ -330,9 +332,40 @@ func sanitizeCallForUser(call *models.CallSession, userID int) *models.CallSessi
 	copy := *call
 	if copy.CallerID != userID {
 		copy.AnswerSDP = ""
+	} else if copy.AnswerSDP != "" {
+		copy.AnswerSDP = normalizeSDP(copy.AnswerSDP)
 	}
 	if copy.CalleeID != userID {
 		copy.OfferSDP = ""
+	} else if copy.OfferSDP != "" {
+		copy.OfferSDP = normalizeSDP(copy.OfferSDP)
 	}
 	return &copy
+}
+
+func normalizeSDP(sdp string) string {
+	sdp = strings.TrimSpace(sdp)
+	if sdp == "" {
+		return sdp
+	}
+
+	sdp = strings.ReplaceAll(sdp, "\r\n", "\n")
+	sdp = strings.ReplaceAll(sdp, "\r", "\n")
+
+	lines := strings.Split(sdp, "\n")
+	out := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if strings.HasPrefix(line, "a=ssrc:") || strings.HasPrefix(line, "a=ssrc-group:") {
+			continue
+		}
+		out = append(out, line)
+	}
+	if len(out) == 0 {
+		return sdp
+	}
+	return strings.Join(out, "\r\n") + "\r\n"
 }

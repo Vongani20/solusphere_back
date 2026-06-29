@@ -253,6 +253,11 @@ func main() {
 		log.Println(" Database migrations completed")
 	}
 
+	if err := database.EnsureChatAndCallSchema(database.DB); err != nil {
+		log.Fatalf(" Failed to ensure chat/call schema: %v", err)
+	}
+	log.Println(" Chat/call schema verified")
+
 	// CRITICAL: Verify database connection is still alive after migrations
 	log.Println(" Verifying database connection after migrations...")
 	if err := database.DB.Ping(); err != nil {

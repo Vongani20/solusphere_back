@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 	"strings"
@@ -75,7 +76,8 @@ func StartCall(c *gin.Context) {
 
 	call, err := models.CreateCallSession(database.DB, userID, calleeID, callType, offerSDP)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start call"})
+		log.Printf("StartCall failed caller=%d callee=%d: %v", userID, calleeID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start call", "details": err.Error()})
 		return
 	}
 
@@ -91,7 +93,8 @@ func ListIncomingCalls(c *gin.Context) {
 
 	calls, err := models.ListIncomingCalls(database.DB, userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load incoming calls"})
+		log.Printf("ListIncomingCalls failed user=%d: %v", userID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load incoming calls", "details": err.Error()})
 		return
 	}
 

@@ -95,6 +95,8 @@ func ListIncomingCalls(c *gin.Context) {
 		return
 	}
 
+	setNoCacheHeaders(c)
+
 	sanitized := make([]models.CallSession, 0, len(calls))
 	for i := range calls {
 		sanitized = append(sanitized, *sanitizeCallForUser(&calls[i], userID))
@@ -114,7 +116,15 @@ func GetCall(c *gin.Context) {
 		return
 	}
 
+	setNoCacheHeaders(c)
+
 	c.JSON(http.StatusOK, gin.H{"call": sanitizeCallForUser(call, userID)})
+}
+
+func setNoCacheHeaders(c *gin.Context) {
+	c.Header("Cache-Control", "no-store, no-cache, must-revalidate")
+	c.Header("Pragma", "no-cache")
+	c.Header("Expires", "0")
 }
 
 func AcceptCall(c *gin.Context) {
@@ -249,6 +259,8 @@ func ListCallCandidates(c *gin.Context) {
 	if !ok {
 		return
 	}
+
+	setNoCacheHeaders(c)
 
 	sinceID := int64(0)
 	if raw := c.Query("since_id"); raw != "" {

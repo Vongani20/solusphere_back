@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -148,6 +149,71 @@ func validateCVProfile(p *models.CVProfile) map[string]string {
 	}
 
 	return errs
+}
+
+// ImportCVFromDocument parses an uploaded CV PDF and returns structured fields for the wizard.
+func ImportCVFromDocument(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	if !requireDocumentProcessingConsent(c, userID) {
+		return
+	}
+
+	file, err := c.FormFile("document")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "CV document is required"})
+		return
+	}
+
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	if ext != ".pdf" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Only PDF files are supported"})
+		return
+	}
+
+	const maxSize = 10 << 20 // 10 MB
+	if file.Size > maxSize {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "File must be smaller than 10 MB"})
+		return
+	}
+
+	src, err := file.Open()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read uploaded file"})
+		return
+	}
+	defer src.Close()
+
+	data, err := io.ReadAll(src)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read uploaded file"})
+		return
+	}
+
+	text, _, err := services.ExtractTextFromPDFBytes(data)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Could not read text from PDF. Try a text-based PDF export."})
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Minute)
+	defer cancel()
+
+	profile, warnings, err := services.ParseCVFromDocumentText(ctx, text)
+	if err != nil {
+		log.Printf("CV import failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse CV document", "details": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"cv":       profile,
+		"warnings": warnings,
+		"message":  "CV imported. Review the form and save when ready.",
+	})
 }
 
 // UploadCVPhoto handles profile photo upload, stores in S3, and updates the CV record.

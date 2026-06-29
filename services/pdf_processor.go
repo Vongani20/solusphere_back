@@ -10,6 +10,31 @@ import (
 	"solusphere_backend/models"
 )
 
+const bpoAnalysisSystemPrompt = `You are an expert BPO (Business Process Outsourcing) document analyst.
+Read the document text carefully and return ONLY valid JSON with this structure:
+{
+  "document_type": "invoice|contract|report|form|general",
+  "summary": "2-4 sentence executive summary of the document",
+  "key_entities": ["organizations, people, products, or identifiers mentioned"],
+  "important_dates": [{"label": "what the date refers to", "date": "YYYY-MM-DD or original text"}],
+  "financial_data": [{"label": "description", "amount": "numeric or text amount", "currency": "ISO code or symbol"}],
+  "parties_involved": [{"name": "party name", "role": "vendor|customer|employer|employee|other"}],
+  "risks": ["compliance, payment, legal, or operational risks found in the document"],
+  "recommendations": ["actionable next steps for a BPO operations team"],
+  "confidence_score": 0.0,
+  "type_specific": {}
+}
+Rules:
+- Extract only information explicitly present in the document. Do not invent amounts, dates, or parties.
+- Set confidence_score between 0 and 1 based on text clarity and completeness.
+- Populate type_specific with fields relevant to document_type:
+  - invoice: invoice_number, due_date, line_items[], subtotal, tax, total, payment_terms
+  - contract: title, effective_date, end_date, key_clauses[], payment_terms
+  - report: title, period, key_findings[], metrics{}
+  - form: title, required_fields[], submission_deadline
+  - general: main_topics[], action_items[]
+- If a field is unknown, use an empty string, empty array, or empty object.`
+
 type PDFProcessor struct {
 	openAIService *OpenAIService
 }
@@ -20,178 +45,83 @@ func NewPDFProcessor(openAIService *OpenAIService) *PDFProcessor {
 	}
 }
 
-// ExtractTextFromPDF extracts text content from PDF file
-// Note: You'll need to implement actual PDF text extraction
-// For now, this is a placeholder that returns mock data
+// ExtractTextFromPDF extracts text content from a PDF file on disk.
 func (p *PDFProcessor) ExtractTextFromPDF(filePath string) (string, int, error) {
 	log.Printf("Processing PDF file: %s", filePath)
-
-	// TODO: Implement actual PDF text extraction
-	// You can use libraries like:
-	// - github.com/unidoc/unipdf/v3
-	// - github.com/ledongthuc/pdf
-	// - Or call an external service
-
-	// Mock implementation for testing
-	mockText := `INVOICE
-    Invoice Number: INV-2024-001
-    Date: January 15, 2024
-    Vendor: ABC Corporation
-    Customer: XYZ Enterprises
-    Amount Due: $1,500.00
-    Due Date: February 15, 2024
-    
-    Line Items:
-    - Service Fee: $1,200.00
-    - Tax: $300.00
-    - Total: $1,500.00`
-
-	return mockText, 1, nil
+	return ReadPDFDocumentText(filePath)
 }
 
-// AnalyzeBPOContent analyzes extracted text using OpenAI
+// AnalyzeBPOContent analyzes extracted text using OpenAI structured JSON output.
 func (p *PDFProcessor) AnalyzeBPOContent(ctx context.Context, text string, analysisType string) (map[string]interface{}, error) {
 	if text == "" {
 		return nil, fmt.Errorf("no text content to analyze")
 	}
-	if p.openAIService == nil {
+	if p.openAIService == nil && !IsOpenAIInitialized() {
 		return nil, fmt.Errorf("OpenAI service is not configured")
 	}
 
-	prompt := p.generateAnalysisPrompt(text, analysisType)
+	userPrompt := fmt.Sprintf(
+		"Document type hint: %s\n\nAnalyze this BPO document and return structured JSON:\n\n%s",
+		analysisType,
+		text,
+	)
 
-	result, err := p.openAIService.AnalyzeContent(ctx, prompt)
+	payload, err := GenerateStructuredJSON(ctx, bpoAnalysisSystemPrompt, userPrompt, 3000)
 	if err != nil {
-		return nil, fmt.Errorf("failed to analyze content with OpenAI: %v", err)
+		return nil, fmt.Errorf("failed to analyze content with OpenAI: %w", err)
 	}
 
-	return p.parseAnalysisResult(result, analysisType), nil
+	return buildBPOAnalysisResult(payload, analysisType), nil
 }
 
-// generateAnalysisPrompt creates tailored prompts for different BPO document types
-func (p *PDFProcessor) generateAnalysisPrompt(text string, analysisType string) string {
-	basePrompt := `Analyze the following BPO (Business Process Outsourcing) document and extract structured information. 
-    Focus on identifying key business entities, financial data, dates, parties involved, and important terms.
-    Provide the response in a structured JSON format.`
-
-	switch analysisType {
-	case models.TypeInvoice:
-		return basePrompt + ` Specifically for this INVOICE document, extract:
-        - Invoice number, issue date, due date
-        - Vendor details (name, address, contact)
-        - Customer details (name, address, contact)
-        - Line items (description, quantity, unit price, total)
-        - Subtotals, taxes, discounts, grand total
-        - Payment terms, methods, and instructions
-        - Currency and tax identification numbers
-        - Any special notes or terms
-        Document text: ` + text
-
-	case models.TypeContract:
-		return basePrompt + ` Specifically for this CONTRACT document, extract:
-        - Contract title and effective date
-        - Parties involved with their roles and details
-        - Contract duration and termination clauses
-        - Key obligations and responsibilities
-        - Payment terms, amounts, and schedules
-        - Confidentiality and non-disclosure terms
-        - Liability and indemnification clauses
-        - Governing law and dispute resolution
-        - Important deadlines and milestones
-        - Renewal and termination conditions
-        Document text: ` + text
-
-	case models.TypeReport:
-		return basePrompt + ` Specifically for this REPORT document, extract:
-        - Report title and type
-        - Report period and date
-        - Authors and contributors
-        - Executive summary and key findings
-        - Data metrics and performance indicators
-        - Recommendations and action items
-        - Risk assessments and mitigation strategies
-        - Financial data and analysis
-        - Conclusions and next steps
-        Document text: ` + text
-
-	case models.TypeForm:
-		return basePrompt + ` Specifically for this FORM document, extract:
-        - Form title and purpose
-        - Required fields and sections
-        - Submission instructions and deadlines
-        - Contact information and support details
-        - Terms and conditions
-        - Required attachments or documentation
-        Document text: ` + text
-
-	default:
-		return basePrompt + ` For this GENERAL document, extract:
-        - Document type and purpose
-        - Key entities and stakeholders
-        - Important dates and timelines
-        - Financial figures and amounts
-        - Contact information
-        - Main topics and subjects
-        - Action items or next steps
-        Document text: ` + text
+func buildBPOAnalysisResult(payload map[string]interface{}, fallbackType string) map[string]interface{} {
+	docType := stringFromAny(payload["document_type"])
+	if docType == "" {
+		docType = fallbackType
 	}
-}
 
-// parseAnalysisResult processes the AI response into structured data
-func (p *PDFProcessor) parseAnalysisResult(result string, analysisType string) map[string]interface{} {
+	extracted := map[string]interface{}{
+		"summary":          stringFromAny(payload["summary"]),
+		"document_type":    docType,
+		"key_entities":     payload["key_entities"],
+		"important_dates":  payload["important_dates"],
+		"financial_data":   payload["financial_data"],
+		"parties_involved": payload["parties_involved"],
+		"risks":            payload["risks"],
+		"recommendations":  payload["recommendations"],
+		"confidence_score": confidenceFromResult(payload, 0.75),
+	}
+
 	analysis := map[string]interface{}{
-		"analysis_type": analysisType,
-		"extracted_data": map[string]interface{}{
-			"summary":          result,
-			"document_type":    analysisType,
-			"key_entities":     []string{},
-			"important_dates":  []string{},
-			"financial_data":   []string{},
-			"parties_involved": []string{},
-			"confidence_score": 0.85,
-		},
+		"analysis_type":  docType,
+		"extracted_data": extracted,
 		"processing_info": map[string]interface{}{
 			"processed_at": time.Now().Format(time.RFC3339),
 			"model_used":   GetOpenAIModel(),
-			"api_version":  "v1",
+			"api_version":  "v2",
 			"status":       "completed",
 		},
 	}
 
-	// Add type-specific fields
-	switch analysisType {
-	case models.TypeInvoice:
-		analysis["invoice_data"] = map[string]interface{}{
-			"invoice_number": "",
-			"vendor_info":    map[string]string{},
-			"customer_info":  map[string]string{},
-			"line_items":     []map[string]interface{}{},
-			"total_amount":   0.0,
-			"currency":       "",
-		}
-	case models.TypeContract:
-		analysis["contract_data"] = map[string]interface{}{
-			"contract_title": "",
-			"parties":        []map[string]string{},
-			"effective_date": "",
-			"end_date":       "",
-			"key_clauses":    []string{},
-			"payment_terms":  map[string]interface{}{},
-		}
-	case models.TypeReport:
-		analysis["report_data"] = map[string]interface{}{
-			"report_title":    "",
-			"period_covered":  "",
-			"key_findings":    []string{},
-			"recommendations": []string{},
-			"metrics":         map[string]interface{}{},
+	if typeSpecific, ok := payload["type_specific"].(map[string]interface{}); ok && len(typeSpecific) > 0 {
+		switch docType {
+		case models.TypeInvoice:
+			analysis["invoice_data"] = typeSpecific
+		case models.TypeContract:
+			analysis["contract_data"] = typeSpecific
+		case models.TypeReport:
+			analysis["report_data"] = typeSpecific
+		case models.TypeForm:
+			analysis["form_data"] = typeSpecific
+		default:
+			analysis["general_data"] = typeSpecific
 		}
 	}
 
 	return analysis
 }
 
-// DetectDocumentType attempts to classify the document type based on content
+// DetectDocumentType attempts to classify the document type based on content.
 func (p *PDFProcessor) DetectDocumentType(text string) string {
 	if text == "" {
 		return models.TypeGeneral
@@ -199,7 +129,6 @@ func (p *PDFProcessor) DetectDocumentType(text string) string {
 
 	textLower := strings.ToLower(text)
 
-	// Check for invoice indicators
 	if strings.Contains(textLower, "invoice") ||
 		strings.Contains(textLower, "bill to") ||
 		strings.Contains(textLower, "amount due") ||
@@ -209,7 +138,6 @@ func (p *PDFProcessor) DetectDocumentType(text string) string {
 		return models.TypeInvoice
 	}
 
-	// Check for contract indicators
 	if strings.Contains(textLower, "contract") ||
 		strings.Contains(textLower, "agreement") ||
 		strings.Contains(textLower, "party a") ||
@@ -219,7 +147,6 @@ func (p *PDFProcessor) DetectDocumentType(text string) string {
 		return models.TypeContract
 	}
 
-	// Check for report indicators
 	if strings.Contains(textLower, "report") ||
 		strings.Contains(textLower, "analysis") ||
 		strings.Contains(textLower, "findings") ||
@@ -228,7 +155,6 @@ func (p *PDFProcessor) DetectDocumentType(text string) string {
 		return models.TypeReport
 	}
 
-	// Check for form indicators
 	if strings.Contains(textLower, "form") ||
 		strings.Contains(textLower, "application") ||
 		strings.Contains(textLower, "please complete") ||
@@ -239,10 +165,8 @@ func (p *PDFProcessor) DetectDocumentType(text string) string {
 	return models.TypeGeneral
 }
 
-// ValidatePDF checks if the file is a valid PDF (placeholder)
+// ValidatePDF checks if the file is a valid PDF by extension.
 func (p *PDFProcessor) ValidatePDF(filePath string) error {
-	// TODO: Implement actual PDF validation
-	// For now, just check if file exists and has .pdf extension
 	if !strings.HasSuffix(strings.ToLower(filePath), ".pdf") {
 		return fmt.Errorf("file is not a PDF")
 	}

@@ -33,6 +33,15 @@ func NewBPOAnalysisHandler(db *sql.DB, pdfProcessor *services.PDFProcessor, uplo
 
 // UploadAndAnalyzePDF handles PDF upload and analysis
 func (h *BPOAnalysisHandler) UploadAndAnalyzePDF(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	if !requireDocumentProcessingConsent(c, userID) {
+		return
+	}
+
 	file, err := c.FormFile("document")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -312,9 +321,12 @@ func (h *BPOAnalysisHandler) updateAnalysisStatus(analysisID string, status stri
 // helper function to extract confidence score from analysis result
 func getConfidenceScore(analysisResult map[string]interface{}) float64 {
 	if extractedData, ok := analysisResult["extracted_data"].(map[string]interface{}); ok {
-		if confidence, ok := extractedData["confidence"].(float64); ok {
+		if confidence, ok := extractedData["confidence_score"].(float64); ok && confidence > 0 {
+			return confidence
+		}
+		if confidence, ok := extractedData["confidence"].(float64); ok && confidence > 0 {
 			return confidence
 		}
 	}
-	return 0.85
+	return 0.75
 }

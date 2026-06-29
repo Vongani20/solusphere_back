@@ -435,6 +435,8 @@ func main() {
 		protected.GET("/profile", handlers.Profile)
 		protected.PATCH("/auth/password", handlers.UpdatePassword)
 		protected.GET("/users", handlers.ListChatUsers)
+		protected.GET("/consent", handlers.GetUserConsents)
+		protected.POST("/consent", handlers.SignUserConsent)
 
 		// Face registration - requires authentication
 		protected.POST("/face/register", handlers.RegisterFace(rekogSvc))
@@ -502,6 +504,7 @@ func main() {
 			cv.PATCH("", handlers.CreateOrUpdateCV)
 			cv.DELETE("", handlers.DeleteCV)
 			cv.POST("/photo", handlers.UploadCVPhoto)
+			cv.POST("/import", handlers.ImportCVFromDocument)
 			cv.GET("/download", handlers.DownloadCVPDF)
 			cv.GET("/search", handlers.SearchCVs)
 		}
@@ -571,7 +574,8 @@ func main() {
 	log.Println("  POST /api/face/register    ✅ Register new face (requires auth)")
 	log.Println("  PUT  /api/face/update      ✅ Update face (requires auth)")
 	log.Println("  DELETE /api/face/delete    ✅ Delete face (requires auth)")
-	log.Println("  GET  /api/profile (requires auth)")
+	log.Println("  GET  /api/consent (requires auth)")
+	log.Println("  POST /api/consent (requires auth)")
 	log.Println("  PATCH /api/auth/password (requires auth)")
 	log.Println("  POST /api/helpdesk (requires auth)")
 	log.Println("  GET  /api/events (requires auth)")
@@ -606,6 +610,7 @@ func main() {
 	log.Println("  PATCH /api/cv (requires auth)")
 	log.Println("  DELETE /api/cv (requires auth)")
 	log.Println("  POST /api/cv/photo (requires auth)")
+	log.Println("  POST /api/cv/import (requires auth)")
 	log.Println("  GET  /api/cv/download (requires auth)")
 	log.Println("  GET  /api/cv/search?skill=&qualification= (requires auth)")
 	log.Println("  GET  /api/admin/cvs (admin)")

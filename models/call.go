@@ -356,3 +356,15 @@ func scanCallIceCandidate(scanner interface {
 	}
 	return item, nil
 }
+
+func MarkMissedCallsSeenWithPeer(db *sql.DB, calleeID, callerID int) error {
+	_, err := db.Exec(`
+		UPDATE call_sessions
+		SET callee_seen_at = NOW()
+		WHERE callee_id = ?
+		  AND caller_id = ?
+		  AND status = ?
+		  AND callee_seen_at IS NULL
+	`, calleeID, callerID, CallStatusMissed)
+	return err
+}

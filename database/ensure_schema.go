@@ -51,7 +51,7 @@ func ensureDirectMessageAttachmentColumns(db *sql.DB) error {
 
 func ensureCallSessionTables(db *sql.DB) error {
 	if tableExists(db, "call_sessions") && tableExists(db, "call_ice_candidates") {
-		return nil
+		return ensureCallCalleeSeenColumn(db)
 	}
 
 	if _, err := db.Exec(`
@@ -88,6 +88,17 @@ func ensureCallSessionTables(db *sql.DB) error {
 			INDEX idx_call_ice_call_id (call_id, id)
 		)
 	`)
+	if err != nil {
+		return err
+	}
+	return ensureCallCalleeSeenColumn(db)
+}
+
+func ensureCallCalleeSeenColumn(db *sql.DB) error {
+	if !tableExists(db, "call_sessions") || columnExists(db, "call_sessions", "callee_seen_at") {
+		return nil
+	}
+	_, err := db.Exec(`ALTER TABLE call_sessions ADD COLUMN callee_seen_at TIMESTAMP NULL AFTER ended_at`)
 	return err
 }
 

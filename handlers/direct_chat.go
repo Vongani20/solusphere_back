@@ -55,7 +55,10 @@ func ListDirectConversations(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"conversations": conversations})
+	c.JSON(http.StatusOK, gin.H{
+		"conversations": conversations,
+		"inbox":         models.SummarizeChatInbox(conversations),
+	})
 }
 
 func ListDirectMessages(c *gin.Context) {
@@ -89,6 +92,8 @@ func ListDirectMessages(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load messages"})
 		return
 	}
+
+	_ = models.MarkMissedCallsSeenWithPeer(database.DB, userID, otherUserID)
 
 	c.JSON(http.StatusOK, gin.H{"messages": messages})
 }

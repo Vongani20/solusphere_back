@@ -1,16 +1,100 @@
 package services
 
 import (
+	"archive/zip"
 	"bytes"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/ledongthuc/pdf"
 )
 
 const maxDocumentTextRunes = 50000
+
+var docxTextRunPattern = regexp.MustCompile(`(?s)<w:t(?:\s[^>]*)?>(.*?)</w:t>`)
+
+// ExtractTextFromCVUpload extracts readable text from an uploaded CV PDF or Word document.
+func ExtractTextFromCVUpload(filename string, data []byte) (string, error) {
+	ext := strings.ToLower(filepath.Ext(filename))
+	switch ext {
+	case ".pdf":
+		text, _, err := ExtractTextFromPDFBytes(data)
+		return text, err
+	case ".docx":
+		return ExtractTextFromDocxBytes(data)
+	case ".doc":
+		return "", fmt.Errorf("legacy .doc files are not supported — please upload a .docx or PDF")
+	default:
+		return "", fmt.Errorf("unsupported file type %q — upload a PDF or Word (.docx) file", ext)
+	}
+}
+
+// ExtractTextFromDocxBytes extracts plain text from a .docx (OOXML) document.
+func ExtractTextFromDocxBytes(data []byte) (string, error) {
+	if len(data) < 4 || string(data[:2]) != "PK" {
+		return "", fmt.Errorf("file is not a valid Word (.docx) document")
+	}
+
+	reader, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		return "", fmt.Errorf("open docx: %w", err)
+	}
+
+	var xml string
+	for _, f := range reader.File {
+		if f.Name != "word/document.xml" {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return "", fmt.Errorf("open docx document.xml: %w", err)
+		}
+		raw, err := io.ReadAll(rc)
+		rc.Close()
+		if err != nil {
+			return "", fmt.Errorf("read docx document.xml: %w", err)
+		}
+		xml = string(raw)
+		break
+	}
+	if xml == "" {
+		return "", fmt.Errorf("docx is missing word/document.xml")
+	}
+
+	matches := docxTextRunPattern.FindAllStringSubmatch(xml, -1)
+	if len(matches) == 0 {
+		return "", fmt.Errorf("no readable text found in Word document")
+	}
+
+	var b strings.Builder
+	for i, match := range matches {
+		if i > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(unescapeXMLText(match[1]))
+	}
+
+	text := normalizeDocumentText(b.String())
+	if text == "" {
+		return "", fmt.Errorf("no readable text found in Word document")
+	}
+	return text, nil
+}
+
+func unescapeXMLText(s string) string {
+	replacer := strings.NewReplacer(
+		"&amp;", "&",
+		"&lt;", "<",
+		"&gt;", ">",
+		"&quot;", `"`,
+		"&apos;", "'",
+	)
+	return replacer.Replace(s)
+}
 
 // ReadPDFDocumentText reads text content from a PDF file path.
 func ReadPDFDocumentText(filePath string) (string, int, error) {

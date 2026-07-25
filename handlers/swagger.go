@@ -1275,21 +1275,81 @@ const openAPISpecJSON = `{
         }
       }
     },
+    "/api/cv/import": {
+      "post": {
+        "tags": ["CV Builder"],
+        "summary": "Import CV fields from a PDF or Word document",
+        "description": "Accepts a PDF or Word (.docx) CV up to 10 MB. Extracts text, maps it into CV Builder fields, and returns a draft for review. Does not save until the client calls POST/PATCH /api/cv.",
+        "security": [{ "BearerAuth": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["document"],
+                "properties": {
+                  "document": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "PDF or Word (.docx) CV, max 10 MB"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Parsed CV draft",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "cv": { "$ref": "#/components/schemas/CVProfile" },
+                    "warnings": { "type": "array", "items": { "type": "string" } },
+                    "message": { "type": "string" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "$ref": "#/components/responses/Error" },
+          "401": { "$ref": "#/components/responses/Error" },
+          "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
+          "500": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
     "/api/cv/download": {
       "get": {
         "tags": ["CV Builder"],
-        "summary": "Download the current user's CV as a branded PDF",
-        "description": "Generates a two-page SoluGrowth-branded PDF from the stored CV data and returns it as a file download.",
+        "summary": "Download the current user's CV as a branded PDF or Word document",
+        "description": "Generates a SoluGrowth-branded CV from stored data. Default format is PDF; pass format=word or format=docx for a Word document.",
         "security": [{ "BearerAuth": [] }],
+        "parameters": [
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "description": "Download format: pdf (default), word, or docx",
+            "schema": { "type": "string", "enum": ["pdf", "word", "docx"], "default": "pdf" }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "PDF file",
+            "description": "CV file (PDF or Word)",
             "content": {
               "application/pdf": {
+                "schema": { "type": "string", "format": "binary" }
+              },
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
                 "schema": { "type": "string", "format": "binary" }
               }
             }
           },
+          "400": { "$ref": "#/components/responses/Error" },
           "401": { "$ref": "#/components/responses/Error" },
           "404": { "$ref": "#/components/responses/Error" },
           "428": { "$ref": "#/components/responses/FaceRegistrationRequired" },
@@ -1433,18 +1493,31 @@ const openAPISpecJSON = `{
     "/api/admin/cvs/{user_id}/download": {
       "get": {
         "tags": ["CV Builder", "Admin"],
-        "summary": "Download any user's CV as a branded PDF (admin)",
+        "summary": "Download any user's CV as a branded PDF or Word document (admin)",
         "security": [{ "BearerAuth": [] }],
-        "parameters": [{ "$ref": "#/components/parameters/UserID" }],
+        "parameters": [
+          { "$ref": "#/components/parameters/UserID" },
+          {
+            "name": "format",
+            "in": "query",
+            "required": false,
+            "description": "Download format: pdf (default), word, or docx",
+            "schema": { "type": "string", "enum": ["pdf", "word", "docx"], "default": "pdf" }
+          }
+        ],
         "responses": {
           "200": {
-            "description": "PDF file",
+            "description": "CV file (PDF or Word)",
             "content": {
               "application/pdf": {
+                "schema": { "type": "string", "format": "binary" }
+              },
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
                 "schema": { "type": "string", "format": "binary" }
               }
             }
           },
+          "400": { "$ref": "#/components/responses/Error" },
           "401": { "$ref": "#/components/responses/Error" },
           "403": { "$ref": "#/components/responses/Error" },
           "404": { "$ref": "#/components/responses/Error" },

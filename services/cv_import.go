@@ -35,7 +35,10 @@ Read the document text and return ONLY valid JSON matching this schema:
 Rules:
 - Extract only facts present in the document. Do not invent employers, degrees, or dates.
 - Normalize date_of_birth to YYYY-MM-DD when possible.
-- Keep profile_text concise (2-4 sentences).
+- Keep profile_text concise (max ~80 words).
+- Keep value_proposition concise (max ~120 words).
+- Prefer at most 4 professional skills (with up to 2 short details each), 4 qualifications, 4 computer skills, 3 memberships, and 4 languages.
+- Prefer the 2 most recent experience roles, with up to 4 short scope-of-work bullets each.
 - If a field is missing, use an empty string or empty array.
 - Include warnings for ambiguous or missing critical data.`
 
@@ -53,6 +56,7 @@ func ParseCVFromDocumentText(ctx context.Context, text string) (*models.CVProfil
 
 	profile := mapToCVProfile(payload)
 	models.SanitizeCVProfile(profile)
+	profile = FitCVProfileForTemplate(profile)
 
 	warnings := stringListFromAny(payload["warnings"])
 	if len(profile.FirstName) == 0 && len(profile.LastName) == 0 {

@@ -51,6 +51,11 @@ func NewCVPDFService() *CVPDFService {
 }
 
 func (s *CVPDFService) GeneratePDF(profile *models.CVProfile) ([]byte, error) {
+	if profile == nil {
+		return nil, fmt.Errorf("profile is required")
+	}
+	profile = FitCVProfileForTemplate(profile)
+
 	pdf := fpdf.New("P", "mm", "A4", "")
 	pdf.SetMargins(cvML, cvMT, cvMR)
 	pdf.SetAutoPageBreak(false, 0)

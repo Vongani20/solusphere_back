@@ -154,7 +154,8 @@ func validateCVProfile(p *models.CVProfile) map[string]string {
 	return errs
 }
 
-// ImportCVFromDocument parses an uploaded CV PDF and returns structured fields for the wizard.
+// ImportCVFromDocument parses an uploaded CV PDF or Word (.docx) and returns
+// structured fields for the wizard.
 func ImportCVFromDocument(c *gin.Context) {
 	userID, ok := currentUserID(c)
 	if !ok {
@@ -172,8 +173,8 @@ func ImportCVFromDocument(c *gin.Context) {
 	}
 
 	ext := strings.ToLower(filepath.Ext(file.Filename))
-	if ext != ".pdf" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Only PDF files are supported"})
+	if ext != ".pdf" && ext != ".docx" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Only PDF and Word (.docx) files are supported"})
 		return
 	}
 
@@ -196,9 +197,9 @@ func ImportCVFromDocument(c *gin.Context) {
 		return
 	}
 
-	text, _, err := services.ExtractTextFromPDFBytes(data)
+	text, err := services.ExtractTextFromCVUpload(file.Filename, data)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Could not read text from PDF. Try a text-based PDF export."})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Could not read text from document. Try a text-based PDF or .docx export.", "details": err.Error()})
 		return
 	}
 
@@ -394,9 +395,32 @@ func downloadCVForUser(c *gin.Context, userID int) {
 		return
 	}
 
-	pdfBytes, err := cvPDFService.GeneratePDF(profile)
+	format := strings.ToLower(strings.TrimSpace(c.DefaultQuery("format", "pdf")))
+	wantWord := format == "word" || format == "docx"
+
+	var (
+		fileBytes   []byte
+		contentType string
+		ext         string
+		label       string
+	)
+
+	if wantWord {
+		fileBytes, err = cvPDFService.GenerateWord(profile)
+		contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+		ext = "docx"
+		label = "Word document"
+	} else if format == "" || format == "pdf" {
+		fileBytes, err = cvPDFService.GeneratePDF(profile)
+		contentType = "application/pdf"
+		ext = "pdf"
+		label = "PDF"
+	} else {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unsupported format. Use pdf or word (docx)."})
+		return
+	}
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate PDF"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate " + label})
 		return
 	}
 
@@ -407,10 +431,10 @@ func downloadCVForUser(c *gin.Context, userID int) {
 		filename = fmt.Sprintf("CV_%s_%s", firstName, lastName)
 	}
 
-	c.Header("Content-Type", "application/pdf")
-	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.pdf"`, filename))
-	c.Header("Content-Length", strconv.Itoa(len(pdfBytes)))
-	c.Data(http.StatusOK, "application/pdf", pdfBytes)
+	c.Header("Content-Type", contentType)
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.%s"`, filename, ext))
+	c.Header("Content-Length", strconv.Itoa(len(fileBytes)))
+	c.Data(http.StatusOK, contentType, fileBytes)
 }
 
 func parseCVSearchOptions(c *gin.Context) models.CVSearchOptions {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -287,8 +288,21 @@ func (s *CVPDFService) drawPhoto(pdf *fpdf.Fpdf, x, y, w, h float64, photoURL st
 		if err == nil {
 			name := fmt.Sprintf("cv-photo-%d", time.Now().UnixNano())
 			opts := fpdf.ImageOptions{ImageType: imgType}
-			pdf.RegisterImageOptionsReader(name, opts, bytes.NewReader(imgData))
-			pdf.ImageOptions(name, x, y, w, h, false, opts, 0, "")
+			info := pdf.RegisterImageOptionsReader(name, opts, bytes.NewReader(imgData))
+
+			// Fit the whole photo inside the frame without cropping or stretching.
+			drawX, drawY, drawW, drawH := x, y, w, h
+			if info != nil && info.Width() > 0 && info.Height() > 0 {
+				scale := math.Min(w/info.Width(), h/info.Height())
+				drawW = info.Width() * scale
+				drawH = info.Height() * scale
+				drawX = x + (w-drawW)/2
+				drawY = y + (h-drawH)/2
+			}
+
+			pdf.SetFillColor(255, 255, 255)
+			pdf.Rect(x, y, w, h, "F")
+			pdf.ImageOptions(name, drawX, drawY, drawW, drawH, false, opts, 0, "")
 			pdf.SetDrawColor(220, 220, 220)
 			pdf.SetLineWidth(0.2)
 			pdf.Rect(x, y, w, h, "D")

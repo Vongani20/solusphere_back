@@ -3,7 +3,14 @@ package services
 import (
 	"archive/zip"
 	"bytes"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
 	"io"
+	"math"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -174,6 +181,48 @@ func TestStripLeadingBullet(t *testing.T) {
 		if got := stripLeadingBullet(in); got != want {
 			t.Fatalf("stripLeadingBullet(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+func TestCVDocxPhotoPNGFitsFrameWithoutCropping(t *testing.T) {
+	// Wide source: every source pixel must survive, padded to the frame ratio.
+	src := image.NewRGBA(image.Rect(0, 0, 400, 100))
+	draw.Draw(src, src.Bounds(), image.NewUniform(color.RGBA{R: 10, G: 20, B: 30, A: 255}), image.Point{}, draw.Src)
+
+	var encoded bytes.Buffer
+	if err := png.Encode(&encoded, src); err != nil {
+		t.Fatalf("encode source: %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Write(encoded.Bytes())
+	}))
+	defer server.Close()
+
+	out := cvDocxPhotoPNG(server.URL + "/photo.png")
+	if out == nil {
+		t.Fatal("expected photo bytes")
+	}
+
+	img, err := png.Decode(bytes.NewReader(out))
+	if err != nil {
+		t.Fatalf("decode result: %v", err)
+	}
+	got := img.Bounds()
+	if got.Dx() < src.Bounds().Dx() || got.Dy() < src.Bounds().Dy() {
+		t.Fatalf("canvas %dx%d smaller than source %dx%d: image was cropped",
+			got.Dx(), got.Dy(), src.Bounds().Dx(), src.Bounds().Dy())
+	}
+
+	ratio := float64(got.Dx()) / float64(got.Dy())
+	if math.Abs(ratio-cvDocxPhotoRatio) > 0.01 {
+		t.Fatalf("canvas ratio %.4f, want %.4f", ratio, cvDocxPhotoRatio)
+	}
+
+	// Padding is white so the frame background stays clean.
+	if r, g, b, _ := img.At(got.Dx()/2, 1).RGBA(); r>>8 != 255 || g>>8 != 255 || b>>8 != 255 {
+		t.Fatalf("expected white padding, got rgb(%d,%d,%d)", r>>8, g>>8, b>>8)
 	}
 }
 

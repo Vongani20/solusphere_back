@@ -6,6 +6,7 @@ import (
 	_ "embed"
 	"fmt"
 	"image"
+	"image/color"
 	"image/draw"
 	_ "image/gif"
 	_ "image/jpeg"
@@ -344,9 +345,10 @@ func fillCVExperience(doc string, entries []models.CVExperience) (string, error)
 
 // ---------- photo ----------
 
-// cvDocxPhotoPNG downloads the profile photo and re-encodes it as a PNG
-// center-cropped to the template photo frame's aspect ratio. Returns nil when
-// no usable photo is available so the template placeholder stays in place.
+// cvDocxPhotoPNG downloads the profile photo and re-encodes it as a PNG that
+// fits the template photo frame without cropping: the whole image is centred
+// on a white canvas matching the frame's aspect ratio. Returns nil when no
+// usable photo is available so the template placeholder stays in place.
 func cvDocxPhotoPNG(photoURL string) []byte {
 	if photoURL == "" {
 		return nil
@@ -364,20 +366,26 @@ func cvDocxPhotoPNG(photoURL string) []byte {
 
 	bounds := img.Bounds()
 	w, h := bounds.Dx(), bounds.Dy()
-	cropW, cropH := w, h
-	if float64(w)/float64(h) > cvDocxPhotoRatio {
-		cropW = int(float64(h) * cvDocxPhotoRatio)
-	} else {
-		cropH = int(float64(w) / cvDocxPhotoRatio)
+	if w <= 0 || h <= 0 {
+		return nil
 	}
-	x0 := bounds.Min.X + (w-cropW)/2
-	y0 := bounds.Min.Y + (h-cropH)/2
 
-	cropped := image.NewRGBA(image.Rect(0, 0, cropW, cropH))
-	draw.Draw(cropped, cropped.Bounds(), img, image.Pt(x0, y0), draw.Src)
+	// Grow the canvas (never crop) so its aspect ratio matches the frame.
+	canvasW, canvasH := w, h
+	if float64(w)/float64(h) > cvDocxPhotoRatio {
+		canvasH = int(float64(w)/cvDocxPhotoRatio + 0.5)
+	} else {
+		canvasW = int(float64(h)*cvDocxPhotoRatio + 0.5)
+	}
+
+	canvas := image.NewRGBA(image.Rect(0, 0, canvasW, canvasH))
+	draw.Draw(canvas, canvas.Bounds(), image.NewUniform(color.White), image.Point{}, draw.Src)
+
+	offset := image.Rect((canvasW-w)/2, (canvasH-h)/2, (canvasW-w)/2+w, (canvasH-h)/2+h)
+	draw.Draw(canvas, offset, img, bounds.Min, draw.Src)
 
 	var buf bytes.Buffer
-	if err := png.Encode(&buf, cropped); err != nil {
+	if err := png.Encode(&buf, canvas); err != nil {
 		log.Printf("CV Word: failed to encode profile photo: %v", err)
 		return nil
 	}

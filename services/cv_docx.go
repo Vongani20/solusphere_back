@@ -265,11 +265,11 @@ func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
 // instead of the text flow. With the template's text anchoring, a sidebar tall
 // enough not to fit below its anchor point gets pushed down the page (or onto
 // page 2), so PERSONAL DETAILS no longer starts at the top. Page anchoring
-// keeps the table's top fixed; overflowing rows continue on the next page.
-// 3593 twips = top margin (1021) + the template's original text offset (2572).
+// at the document's top margin (1021 twips) keeps Personal Details above the
+// other sidebar sections; overflowing rows continue on the next page.
 func pinCVSidebarTable(doc string) string {
 	const floating = `w:vertAnchor="text" w:horzAnchor="page" w:tblpX="6751" w:tblpY="2572"`
-	const pinned = `w:vertAnchor="page" w:horzAnchor="page" w:tblpX="6751" w:tblpY="3593"`
+	const pinned = `w:vertAnchor="page" w:horzAnchor="page" w:tblpX="6751" w:tblpY="1021"`
 	return strings.Replace(doc, floating, pinned, 1)
 }
 

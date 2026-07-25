@@ -101,7 +101,7 @@ func TestGenerateCVWordMatchesTemplateBasics(t *testing.T) {
 
 	// The personal-details sidebar table must be pinned to the page so it
 	// always starts at the top, regardless of how much content it holds.
-	if !strings.Contains(xmlText, `w:vertAnchor="page" w:horzAnchor="page" w:tblpX="6751" w:tblpY="3593"`) {
+	if !strings.Contains(xmlText, `w:vertAnchor="page" w:horzAnchor="page" w:tblpX="6751" w:tblpY="1021"`) {
 		t.Fatal("sidebar table should be page-anchored (personal details on top)")
 	}
 	if strings.Contains(xmlText, `w:vertAnchor="text"`) {

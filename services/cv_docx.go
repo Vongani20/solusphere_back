@@ -112,6 +112,8 @@ func (s *CVPDFService) GenerateWord(profile *models.CVProfile) ([]byte, error) {
 // the top) can never be hijacked by user-provided text that happens to equal
 // a template placeholder.
 func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
+	doc = pinCVSidebarTable(doc)
+
 	// Item paragraph templates, extracted from the pristine document.
 	bulletTemplate, err := extractParagraph(doc, ">Microsoft Office<")
 	if err != nil {
@@ -141,23 +143,36 @@ func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
 	}
 
 	// ---- Profile + value proposition (left column, page 1) ----
-	headStart, headEnd, err := paragraphBounds(doc, ">PROFILE<", 0)
+	// PROFILE / VALUE PROPOSITION / EXPERIENCE share left indent 567 in the
+	// master template. Replace the empty body zone between PROFILE and
+	// EXPERIENCE so section headings stay on that same left margin.
+	_, headEnd, err := paragraphBounds(doc, ">PROFILE<", 0)
 	if err != nil {
 		return "", err
 	}
-	bodyStart, bodyEnd, err := nextParagraph(doc, headEnd)
+	bodyStart, _, err := nextParagraph(doc, headEnd)
 	if err != nil {
 		return "", err
 	}
-	headingPara := doc[headStart:headEnd]
-	emptyBodyPara := doc[bodyStart:bodyEnd]
+	expStart, _, err := paragraphBounds(doc, ">EXPERIENCE<", 0)
+	if err != nil {
+		return "", err
+	}
+	headingPara, err := extractParagraph(doc, ">PROFILE<")
+	if err != nil {
+		return "", err
+	}
+	alignedBody, err := cvAlignedBodyParagraph(doc, bodyStart, expStart)
+	if err != nil {
+		return "", err
+	}
 
-	profilePara := injectRunBeforeClose(emptyBodyPara,
+	profilePara := injectRunBeforeClose(alignedBody,
 		cvBodyRun(orCVPlaceholder(profile.ProfileText, "[Insert profile]")))
 	vpHeading := stripParaIDs(strings.Replace(headingPara, ">PROFILE<", ">VALUE PROPOSITION<", 1))
-	vpPara := stripParaIDs(injectRunBeforeClose(emptyBodyPara,
+	vpPara := stripParaIDs(injectRunBeforeClose(alignedBody,
 		cvBodyRun(orCVPlaceholder(profile.ValueProposition, "[Insert value proposition]"))))
-	doc = doc[:bodyStart] + profilePara + vpHeading + vpPara + doc[bodyEnd:]
+	doc = doc[:bodyStart] + profilePara + vpHeading + vpPara + doc[expStart:]
 
 	// ---- Candidate name ----
 	name := strings.TrimSpace(profile.FirstName + " " + profile.LastName)
@@ -246,6 +261,18 @@ func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
 	})
 }
 
+// pinCVSidebarTable anchors the personal-details sidebar table to the page
+// instead of the text flow. With the template's text anchoring, a sidebar tall
+// enough not to fit below its anchor point gets pushed down the page (or onto
+// page 2), so PERSONAL DETAILS no longer starts at the top. Page anchoring
+// keeps the table's top fixed; overflowing rows continue on the next page.
+// 3593 twips = top margin (1021) + the template's original text offset (2572).
+func pinCVSidebarTable(doc string) string {
+	const floating = `w:vertAnchor="text" w:horzAnchor="page" w:tblpX="6751" w:tblpY="2572"`
+	const pinned = `w:vertAnchor="page" w:horzAnchor="page" w:tblpX="6751" w:tblpY="3593"`
+	return strings.Replace(doc, floating, pinned, 1)
+}
+
 // fillCVExperience replaces the template's two example experience blocks with
 // one generated block per experience entry.
 func fillCVExperience(doc string, entries []models.CVExperience) (string, error) {
@@ -282,11 +309,10 @@ func fillCVExperience(doc string, entries []models.CVExperience) (string, error)
 	if err != nil {
 		return "", err
 	}
-	scopeItemStart, scopeItemEnd, err := nextParagraph(doc, scopeHeadEnd)
+	scopeItemT, err := cvScopeItemParagraph(doc, scopeHeadEnd)
 	if err != nil {
 		return "", err
 	}
-	scopeItemT := doc[scopeItemStart:scopeItemEnd]
 
 	// Replacement range: from the first Company paragraph through the trailing
 	// empty paragraphs after the last example block.
@@ -341,6 +367,57 @@ func fillCVExperience(doc string, entries []models.CVExperience) (string, error)
 	}
 
 	return doc[:blockStart] + blocks.String() + doc[rangeEnd:], nil
+}
+
+// cvAlignedBodyParagraph returns a left-column body paragraph template whose
+// left indent matches PROFILE / EXPERIENCE (567 twips). Falls back to forcing
+// that indent onto the first empty body paragraph in the zone.
+func cvAlignedBodyParagraph(doc string, from, to int) (string, error) {
+	pos := from
+	for pos < to {
+		start, end, err := nextParagraph(doc, pos)
+		if err != nil || start >= to {
+			break
+		}
+		para := doc[start:end]
+		if strings.Contains(para, `w:ind w:left="567"`) && !hasVisibleText(para) {
+			return para, nil
+		}
+		pos = end
+	}
+	start, end, err := nextParagraph(doc, from)
+	if err != nil {
+		return "", err
+	}
+	para := doc[start:end]
+	if strings.Contains(para, `<w:ind `) {
+		para = strings.Replace(para, `<w:ind `, `<w:ind w:left="567" `, 1)
+	} else if strings.Contains(para, `<w:pPr>`) {
+		para = strings.Replace(para, `<w:pPr>`, `<w:pPr><w:ind w:left="567"/>`, 1)
+	}
+	return para, nil
+}
+
+// cvScopeItemParagraph returns the first scope-of-work list paragraph after
+// from that has a real numbering definition. The master template leaves a
+// numId=0 stub immediately under "Scope of work:" — using that stub drops
+// the bullet indent and pushes the text onto the wrong left margin.
+func cvScopeItemParagraph(doc string, from int) (string, error) {
+	pos := from
+	for i := 0; i < 6; i++ {
+		start, end, err := nextParagraph(doc, pos)
+		if err != nil {
+			return "", err
+		}
+		para := doc[start:end]
+		if strings.Contains(para, `<w:numPr>`) &&
+			!strings.Contains(para, `w:numId w:val="0"`) &&
+			!hasVisibleText(para) {
+			return para, nil
+		}
+		pos = end
+	}
+	return "", fmt.Errorf("CV template: no numbered scope-of-work paragraph found")
 }
 
 // ---------- photo ----------

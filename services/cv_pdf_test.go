@@ -74,6 +74,39 @@ func TestGenerateCVWordMatchesTemplateBasics(t *testing.T) {
 			t.Fatalf("expected placeholder %q to be replaced", stale)
 		}
 	}
+
+	// PROFILE, VALUE PROPOSITION, and EXPERIENCE must share left indent 567.
+	for _, heading := range []string{">PROFILE<", ">VALUE PROPOSITION<", ">EXPERIENCE<"} {
+		start, end, err := paragraphBounds(xmlText, heading, 0)
+		if err != nil {
+			t.Fatalf("heading %s: %v", heading, err)
+		}
+		para := xmlText[start:end]
+		if !strings.Contains(para, `w:ind w:left="567"`) {
+			t.Fatalf("heading %s missing left indent 567: %s", heading, para[:min(180, len(para))])
+		}
+	}
+
+	scopeStart, scopeEnd, err := paragraphBounds(xmlText, ">Led a team of 5 analysts<", 0)
+	if err != nil {
+		t.Fatalf("scope item: %v", err)
+	}
+	scopePara := xmlText[scopeStart:scopeEnd]
+	if !strings.Contains(scopePara, `w:numId w:val="2"`) {
+		t.Fatalf("scope item should use list numbering, got: %s", scopePara[:min(220, len(scopePara))])
+	}
+	if !strings.Contains(scopePara, `w:ind w:left="1134"`) {
+		t.Fatalf("scope item should keep list indent, got: %s", scopePara[:min(220, len(scopePara))])
+	}
+
+	// The personal-details sidebar table must be pinned to the page so it
+	// always starts at the top, regardless of how much content it holds.
+	if !strings.Contains(xmlText, `w:vertAnchor="page" w:horzAnchor="page" w:tblpX="6751" w:tblpY="3593"`) {
+		t.Fatal("sidebar table should be page-anchored (personal details on top)")
+	}
+	if strings.Contains(xmlText, `w:vertAnchor="text"`) {
+		t.Fatal("sidebar table still uses text anchoring")
+	}
 }
 
 func TestGenerateCVWordDoesNotOverPopulate(t *testing.T) {
@@ -170,12 +203,12 @@ func officeXMLContains(t *testing.T, data []byte, required string) string {
 
 func TestStripLeadingBullet(t *testing.T) {
 	cases := map[string]string{
-		"• Led a team":  "Led a team",
-		"- Led a team":  "Led a team",
-		"* Led a team":  "Led a team",
+		"• Led a team": "Led a team",
+		"- Led a team": "Led a team",
+		"* Led a team": "Led a team",
 		"— Led a team": "Led a team",
-		"Led a team":    "Led a team",
-		"  -  Scope  ":  "Scope",
+		"Led a team":   "Led a team",
+		"  -  Scope  ": "Scope",
 	}
 	for in, want := range cases {
 		if got := stripLeadingBullet(in); got != want {

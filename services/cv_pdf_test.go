@@ -98,6 +98,19 @@ func TestGenerateCVWordMatchesTemplateBasics(t *testing.T) {
 	if !strings.Contains(scopePara, `w:ind w:left="1134"`) {
 		t.Fatalf("scope item should keep list indent, got: %s", scopePara[:min(220, len(scopePara))])
 	}
+	if !strings.Contains(scopePara, `w:sz w:val="22"`) {
+		t.Fatalf("scope item should use SoluGrowth 11pt (sz=22), got: %s", scopePara[:min(280, len(scopePara))])
+	}
+
+	// EXPERIENCE must start on page 2 (page break immediately before it).
+	expStart, _, err := paragraphBounds(xmlText, ">EXPERIENCE<", 0)
+	if err != nil {
+		t.Fatalf("EXPERIENCE: %v", err)
+	}
+	beforeExp := xmlText[max(0, expStart-800):expStart]
+	if !strings.Contains(beforeExp, `w:type="page"`) {
+		t.Fatal("expected a page break immediately before EXPERIENCE")
+	}
 
 	// The personal-details sidebar table must be pinned to the page so it
 	// always starts at the top, regardless of how much content it holds.

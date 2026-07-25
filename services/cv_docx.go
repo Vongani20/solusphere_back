@@ -143,9 +143,8 @@ func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
 	}
 
 	// ---- Profile + value proposition (left column, page 1) ----
-	// PROFILE / VALUE PROPOSITION / EXPERIENCE share left indent 567 in the
-	// master template. Replace the empty body zone between PROFILE and
-	// EXPERIENCE so section headings stay on that same left margin.
+	// PROFILE / VALUE PROPOSITION stay on page 1; EXPERIENCE follows a page
+	// break so it always starts on page 2. All three share left indent 567.
 	_, headEnd, err := paragraphBounds(doc, ">PROFILE<", 0)
 	if err != nil {
 		return "", err
@@ -172,7 +171,10 @@ func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
 	vpHeading := stripParaIDs(strings.Replace(headingPara, ">PROFILE<", ">VALUE PROPOSITION<", 1))
 	vpPara := stripParaIDs(injectRunBeforeClose(alignedBody,
 		cvBodyRun(orCVPlaceholder(profile.ValueProposition, "[Insert value proposition]"))))
-	doc = doc[:bodyStart] + profilePara + vpHeading + vpPara + doc[expStart:]
+	// Keep EXPERIENCE on page 2 (master template has a page break here; the
+	// profile/VP rewrite must re-insert it because that zone is replaced).
+	pageBreak := cvExperiencePageBreak(doc, bodyStart, expStart)
+	doc = doc[:bodyStart] + profilePara + vpHeading + vpPara + pageBreak + doc[expStart:]
 
 	// ---- Candidate name ----
 	name := strings.TrimSpace(profile.FirstName + " " + profile.LastName)
@@ -367,6 +369,24 @@ func fillCVExperience(doc string, entries []models.CVExperience) (string, error)
 	}
 
 	return doc[:blockStart] + blocks.String() + doc[rangeEnd:], nil
+}
+
+// cvExperiencePageBreak returns the template's page-break paragraph between
+// PROFILE and EXPERIENCE, or a SoluGrowth-styled page break if none is found.
+func cvExperiencePageBreak(doc string, from, to int) string {
+	pos := from
+	for pos < to {
+		start, end, err := nextParagraph(doc, pos)
+		if err != nil || start >= to {
+			break
+		}
+		para := doc[start:end]
+		if strings.Contains(para, `w:type="page"`) {
+			return stripParaIDs(para)
+		}
+		pos = end
+	}
+	return `<w:p><w:pPr><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:b/><w:bCs/><w:iCs/><w:color w:val="007DA4"/><w:sz w:val="26"/><w:szCs w:val="26"/></w:rPr></w:pPr><w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:b/><w:bCs/><w:iCs/><w:color w:val="007DA4"/><w:sz w:val="26"/><w:szCs w:val="26"/></w:rPr><w:br w:type="page"/></w:r></w:p>`
 }
 
 // cvAlignedBodyParagraph returns a left-column body paragraph template whose
@@ -568,7 +588,8 @@ func cvBodyRun(text string) string {
 }
 
 func cvScopeRun(text string) string {
-	return `<w:r><w:rPr><w:rFonts w:ascii="Arial" w:hAnsi="Arial" w:cs="Arial"/><w:sz w:val="16"/><w:szCs w:val="16"/></w:rPr>` +
+	// Match the master template scope-of-work run: Arial 11pt (sz=22).
+	return `<w:r><w:rPr><w:rFonts w:hint="default" w:ascii="Arial" w:hAnsi="Arial" w:eastAsia="Times New Roman"/><w:b w:val="0"/><w:bCs w:val="0"/><w:sz w:val="22"/><w:szCs w:val="22"/><w:lang w:val="en-US"/></w:rPr>` +
 		cvRunTexts(text) + `</w:r>`
 }
 

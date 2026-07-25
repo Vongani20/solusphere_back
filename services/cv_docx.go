@@ -121,13 +121,15 @@ func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
 		return "", err
 	}
 	bulletItem := func(text string) string {
-		return stripParaIDs(strings.Replace(bulletTemplate, ">Microsoft Office<", ">"+xmlEscapeCV(text)+"<", 1))
+		return stripParaIDs(strings.Replace(bulletTemplate, ">Microsoft Office<", ">"+xmlEscapeCV(stripLeadingBullet(text))+"<", 1))
 	}
 	plainItem := func(text string) string {
-		return stripParaIDs(strings.Replace(plainTemplate, ">English<", ">"+xmlEscapeCV(text)+"<", 1))
+		return stripParaIDs(strings.Replace(plainTemplate, ">English<", ">"+xmlEscapeCV(stripLeadingBullet(text))+"<", 1))
 	}
+	// Skill details stay plain (no Word bullet and no "-" prefix) — only the
+	// skill title itself uses a list point, matching the master template.
 	detailItem := func(text string) string {
-		item := plainItem("- " + text)
+		item := plainItem(text)
 		return strings.Replace(item, `<w:ind w:firstLine="29"/>`, `<w:ind w:left="602"/>`, 1)
 	}
 
@@ -329,7 +331,8 @@ func fillCVExperience(doc string, entries []models.CVExperience) (string, error)
 			scopes = []string{"[Insert scope of work]"}
 		}
 		for _, scope := range scopes {
-			blocks.WriteString(stripParaIDs(injectRunBeforeClose(scopeItemT, cvScopeRun("- "+scope))))
+			// Scope paragraphs already carry Word list numbering — do not add "-".
+			blocks.WriteString(stripParaIDs(injectRunBeforeClose(scopeItemT, cvScopeRun(stripLeadingBullet(scope)))))
 		}
 		if i < len(entries)-1 {
 			blocks.WriteString(stripParaIDs(spacerT))
@@ -567,4 +570,22 @@ func orCVPlaceholder(value, placeholder string) string {
 		return placeholder
 	}
 	return value
+}
+
+// stripLeadingBullet removes manual bullet/dash prefixes so Word list
+// numbering is the only point marker used in list sections.
+func stripLeadingBullet(text string) string {
+	text = strings.TrimSpace(text)
+	for {
+		trimmed := text
+		for _, prefix := range []string{"•", "●", "·", "▪", "◦", "-", "–", "—", "*"} {
+			if strings.HasPrefix(trimmed, prefix) {
+				trimmed = strings.TrimSpace(trimmed[len(prefix):])
+			}
+		}
+		if trimmed == text {
+			return text
+		}
+		text = trimmed
+	}
 }

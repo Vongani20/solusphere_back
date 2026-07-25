@@ -161,6 +161,22 @@ func officeXMLContains(t *testing.T, data []byte, required string) string {
 	return ""
 }
 
+func TestStripLeadingBullet(t *testing.T) {
+	cases := map[string]string{
+		"• Led a team":  "Led a team",
+		"- Led a team":  "Led a team",
+		"* Led a team":  "Led a team",
+		"— Led a team": "Led a team",
+		"Led a team":    "Led a team",
+		"  -  Scope  ":  "Scope",
+	}
+	for in, want := range cases {
+		if got := stripLeadingBullet(in); got != want {
+			t.Fatalf("stripLeadingBullet(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestImageTypeFromSource(t *testing.T) {
 	if got := imageTypeFromSource("https://example.com/photo.png", ""); got != "PNG" {
 		t.Fatalf("got %q, want PNG", got)

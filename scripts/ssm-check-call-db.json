@@ -1,0 +1,8 @@
+{
+  "commands": [
+    "docker logs solusphere_app 2>&1 | grep -i migration | tail -20",
+    "docker exec solusphere_db mysql -usolusphere_users -pCaswell1234 solusphere -e \"SHOW TABLES LIKE 'call%';\"",
+    "docker exec solusphere_db mysql -usolusphere_users -pCaswell1234 solusphere -e \"SELECT version, dirty FROM schema_migrations;\"",
+    "docker exec solusphere_db mysql -usolusphere_users -pCaswell1234 solusphere -e \"SHOW COLUMNS FROM direct_messages LIKE 'message_type';\""
+  ]
+}

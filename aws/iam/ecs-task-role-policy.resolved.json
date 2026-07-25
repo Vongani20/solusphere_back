@@ -1,0 +1,57 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "ReadApplicationSecrets",
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:GetSecretValue"
+      ],
+      "Resource": "arn:aws:secretsmanager:eu-west-1:075303608316:secret:solusphere/prod-*"
+    },
+    {
+      "Sid": "UseApplicationBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:GetObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::innovationform/*",
+        "arn:aws:s3:::solusphere/*"
+      ]
+    },
+    {
+      "Sid": "ListApplicationBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::innovationform",
+        "arn:aws:s3:::solusphere"
+      ]
+    },
+    {
+      "Sid": "UseRekognition",
+      "Effect": "Allow",
+      "Action": [
+        "rekognition:CreateCollection",
+        "rekognition:DescribeCollection",
+        "rekognition:IndexFaces",
+        "rekognition:SearchFacesByImage",
+        "rekognition:DeleteFaces"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "PublishPasswordResetSms",
+      "Effect": "Allow",
+      "Action": [
+        "sns:Publish"
+      ],
+      "Resource": "*"
+    }
+  ]
+}

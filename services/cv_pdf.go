@@ -51,7 +51,15 @@ func NewCVPDFService() *CVPDFService {
 	return &CVPDFService{}
 }
 
-func (s *CVPDFService) GeneratePDF(profile *models.CVProfile) ([]byte, error) {
+func (s *CVPDFService) GeneratePDF(profile *models.CVProfile) (out []byte, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("CV PDF panic: %v", rec)
+			out = nil
+			err = fmt.Errorf("PDF generation panicked: %v", rec)
+		}
+	}()
+
 	if profile == nil {
 		return nil, fmt.Errorf("profile is required")
 	}
@@ -260,7 +268,7 @@ func (s *CVPDFService) drawLeftWrappedSection(pdf *fpdf.Fpdf, title, text, place
 	}
 	pdf.SetFont("Helvetica", "", 7.5)
 	setCV_Black(pdf)
-	lines := pdf.SplitText(text, w)
+	lines := pdf.SplitText(pdfSafeText(text), w)
 	lineH := 4.0
 	for _, line := range lines {
 		if y+lineH > maxY {
@@ -334,7 +342,7 @@ func (s *CVPDFService) drawExperiencePages(pdf *fpdf.Fpdf, profile *models.CVPro
 			if scope == "" {
 				continue
 			}
-			text := "- " + scope
+			text := pdfSafeText("- " + scope)
 			pdf.SetFont("Helvetica", "", 8)
 			lines := pdf.SplitText(text, 172)
 			need := float64(len(lines)) * 4.5
@@ -393,7 +401,7 @@ func (s *CVPDFService) drawLabeledWrapped(pdf *fpdf.Fpdf, label, value string, x
 	setCV_Black(pdf)
 	pdf.CellFormat(labelW, 5, label, "", 0, "L", false, 0, "")
 	pdf.SetFont("Helvetica", "", 8.5)
-	lines := pdf.SplitText(value, valueW)
+	lines := pdf.SplitText(pdfSafeText(value), valueW)
 	if len(lines) == 0 {
 		lines = []string{""}
 	}
@@ -445,9 +453,20 @@ func (s *CVPDFService) drawPhoto(pdf *fpdf.Fpdf, x, y, w, h float64, photoURL st
 	pdf.SetFillColor(210, 210, 210)
 	pdf.Rect(x+shadowOffset, y+shadowOffset, w, h, "F")
 
+	drawn := false
 	if photoURL != "" {
-		imgData, imgType, err := downloadImage(photoURL)
-		if err == nil {
+		func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					log.Printf("CV PDF: photo render panic for %q: %v", photoURL, rec)
+					drawn = false
+				}
+			}()
+			imgData, imgType, err := downloadImage(photoURL)
+			if err != nil {
+				log.Printf("CV PDF: failed to load profile photo %q: %v", photoURL, err)
+				return
+			}
 			name := fmt.Sprintf("cv-photo-%d", time.Now().UnixNano())
 			opts := fpdf.ImageOptions{ImageType: imgType}
 			info := pdf.RegisterImageOptionsReader(name, opts, bytes.NewReader(imgData))
@@ -468,9 +487,11 @@ func (s *CVPDFService) drawPhoto(pdf *fpdf.Fpdf, x, y, w, h float64, photoURL st
 			pdf.SetDrawColor(220, 220, 220)
 			pdf.SetLineWidth(0.2)
 			pdf.Rect(x, y, w, h, "D")
-			return
-		}
-		log.Printf("CV PDF: failed to load profile photo %q: %v", photoURL, err)
+			drawn = true
+		}()
+	}
+	if drawn {
+		return
 	}
 
 	pdf.SetDrawColor(200, 200, 200)
@@ -534,10 +555,10 @@ func (s *CVPDFService) drawPersonalDetails(pdf *fpdf.Fpdf, profile *models.CVPro
 	for _, r := range rows {
 		pdf.SetXY(x, y)
 		pdf.SetFont("Helvetica", "", 7.5)
-		setCV_Gray(pdf)
-		pdf.CellFormat(labelW, lineH, r.label, "", 0, "L", false, 0, "")
-		setCV_Black(pdf)
-		pdf.CellFormat(w-labelW, lineH, r.value, "", 1, "L", false, 0, "")
+	setCV_Gray(pdf)
+	pdf.CellFormat(labelW, lineH, pdfSafeText(r.label), "", 0, "L", false, 0, "")
+	setCV_Black(pdf)
+	pdf.CellFormat(w-labelW, lineH, pdfSafeText(r.value), "", 1, "L", false, 0, "")
 		y += lineH
 	}
 	return y

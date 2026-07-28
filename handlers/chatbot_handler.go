@@ -113,7 +113,7 @@ func normalizeChatbotImages(raw []ChatbotImageInput) ([]ai.ImageInput, error) {
 		}
 		out = append(out, ai.ImageInput{
 			ImageURL: dataURL,
-			Detail:   "auto",
+			Detail:   "high",
 		})
 	}
 	return out, nil

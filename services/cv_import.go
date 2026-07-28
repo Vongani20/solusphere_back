@@ -9,7 +9,7 @@ import (
 )
 
 const cvImportSystemPrompt = `You are a CV/resume extraction specialist.
-Read the document text and return ONLY valid JSON matching this schema:
+Read the FULL document text and return ONLY valid JSON matching this schema:
 {
   "first_name": "string",
   "last_name": "string",
@@ -35,12 +35,13 @@ Read the document text and return ONLY valid JSON matching this schema:
 Rules:
 - Extract only facts present in the document. Do not invent employers, degrees, or dates.
 - Normalize date_of_birth to YYYY-MM-DD when possible.
-- Keep profile_text concise (max ~80 words).
-- Keep value_proposition concise (max ~120 words).
-- Prefer at most 4 professional skills (with up to 2 short details each), 4 qualifications, 4 computer skills, 3 memberships, and 4 languages.
-- Prefer the 2 most recent experience roles, with up to 4 short scope-of-work bullets each.
+- Preserve profile_text and value_proposition in full from the document — do not shorten or summarize them.
 - If a field is missing, use an empty string or empty array.
-- Include warnings for ambiguous or missing critical data.`
+- Include warnings for ambiguous or missing critical data.
+- CRITICAL: Extract EVERY work experience / role in the document, not just the first one.
+- For each role, include ALL scope-of-work / responsibility / achievement bullets as separate strings. Do not truncate lists.
+- Do not summarize multiple jobs into one entry. Preserve company, position, period, and bullets per role.
+- Prefer completeness over brevity for experience, skills, qualifications, and every free-text field.`
 
 // ParseCVFromDocumentText maps extracted document text into a CV profile draft.
 func ParseCVFromDocumentText(ctx context.Context, text string) (*models.CVProfile, []string, error) {
@@ -49,18 +50,23 @@ func ParseCVFromDocumentText(ctx context.Context, text string) (*models.CVProfil
 		return nil, nil, fmt.Errorf("document contains no readable text")
 	}
 
-	payload, err := GenerateStructuredJSON(ctx, cvImportSystemPrompt, "Extract CV data from this document:\n\n"+text, 3500)
+	userPrompt := "Extract COMPLETE CV data from this entire document. Do not skip later experience roles or scope bullets. Do not shorten any extracted text.\n\n" + text
+	payload, err := GenerateStructuredJSON(ctx, cvImportSystemPrompt, userPrompt, 16000)
 	if err != nil {
 		return nil, nil, err
 	}
 
 	profile := mapToCVProfile(payload)
 	models.SanitizeCVProfile(profile)
-	profile = FitCVProfileForTemplate(profile)
 
 	warnings := stringListFromAny(payload["warnings"])
 	if len(profile.FirstName) == 0 && len(profile.LastName) == 0 {
 		warnings = append(warnings, "Name could not be detected — please review personal information.")
+	}
+	if len(profile.Experience) == 0 {
+		warnings = append(warnings, "No experience entries were detected — add roles manually and check the source document.")
+	} else if len(profile.Experience) == 1 && strings.Count(strings.ToLower(text), "company") >= 2 {
+		warnings = append(warnings, "Only one experience entry was extracted. Review the Experience step — later roles may need to be added manually.")
 	}
 
 	return profile, warnings, nil

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -10,9 +11,15 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type ChatbotImageInput struct {
+	DataURL string `json:"data_url"`
+	Name    string `json:"name,omitempty"`
+}
+
 type ChatbotRequest struct {
-	Message   string `json:"message" binding:"required"`
-	WebSearch *bool  `json:"web_search,omitempty"`
+	Message   string              `json:"message" binding:"required"`
+	WebSearch *bool               `json:"web_search,omitempty"`
+	Images    []ChatbotImageInput `json:"images,omitempty"`
 }
 
 type ChatbotResponse struct {
@@ -23,6 +30,11 @@ type ChatbotResponse struct {
 	WebSearchEnabled bool          `json:"web_search_enabled"`
 	Error            string        `json:"error,omitempty"`
 }
+
+const (
+	maxChatbotImages     = 6
+	maxChatbotImageBytes = 4 << 20 // data URL string budget (~3MB raw image)
+)
 
 // ChatbotHandler handles chatbot messages using OpenAI.
 func ChatbotHandler() gin.HandlerFunc {
@@ -55,7 +67,13 @@ func ChatbotHandler() gin.HandlerFunc {
 			webSearch = *req.WebSearch
 		}
 
-		response, err := services.GetAgentResponse(req.Message, webSearch)
+		images, err := normalizeChatbotImages(req.Images)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, ChatbotResponse{Error: err.Error()})
+			return
+		}
+
+		response, err := services.GetAgentResponse(req.Message, webSearch, images)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, ChatbotResponse{
 				Error: "Failed to generate response",
@@ -71,4 +89,32 @@ func ChatbotHandler() gin.HandlerFunc {
 			WebSearchEnabled: response.WebSearchEnabled,
 		})
 	}
+}
+
+func normalizeChatbotImages(raw []ChatbotImageInput) ([]ai.ImageInput, error) {
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	if len(raw) > maxChatbotImages {
+		return nil, fmt.Errorf("you can attach at most 6 images per message")
+	}
+
+	out := make([]ai.ImageInput, 0, len(raw))
+	for _, item := range raw {
+		dataURL := strings.TrimSpace(item.DataURL)
+		if dataURL == "" {
+			continue
+		}
+		if !strings.HasPrefix(dataURL, "data:image/") || !strings.Contains(dataURL, ";base64,") {
+			return nil, fmt.Errorf("each image must be a data:image/...;base64,... URL")
+		}
+		if len(dataURL) > maxChatbotImageBytes {
+			return nil, fmt.Errorf("one or more images are too large (max ~3 MB each)")
+		}
+		out = append(out, ai.ImageInput{
+			ImageURL: dataURL,
+			Detail:   "auto",
+		})
+	}
+	return out, nil
 }

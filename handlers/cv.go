@@ -277,7 +277,7 @@ func UploadCVPhoto(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"profile_photo_url": models.ClientAccessiblePhotoURL(photoURL)})
 }
 
-// DownloadCVPDF generates and streams a branded PDF for the authenticated user.
+// DownloadCVPDF generates and streams a branded PDF (or Word via ?format=word) for the authenticated user.
 func DownloadCVPDF(c *gin.Context) {
 	userID, ok := currentUserID(c)
 	if !ok {
@@ -363,7 +363,7 @@ func GetCVByAdmin(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"cv": profile})
 }
 
-// DownloadCVByAdmin generates and streams the PDF for any user.
+// DownloadCVByAdmin generates and streams the PDF/Word for any user.
 func DownloadCVByAdmin(c *gin.Context) {
 	userID, ok := currentUserID(c)
 	if !ok {
@@ -420,6 +420,7 @@ func downloadCVForUser(c *gin.Context, userID int) {
 		return
 	}
 	if err != nil {
+		log.Printf("CV %s generation failed for user %d: %v", label, userID, err)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate " + label})
 		return
 	}

@@ -71,12 +71,15 @@ func GetBPOResponse(userMessage string) (string, error) {
 	})
 }
 
-func GetAgentResponse(userMessage string, webSearch bool) (*AgentResponse, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
+func GetAgentResponse(userMessage string, webSearch bool, images []ai.ImageInput) (*AgentResponse, error) {
+	timeout := 75 * time.Second
+	if len(images) > 0 {
+		timeout = 120 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	result, err := ai.GenerateTextResultWithDefault(ctx, ai.GenerateTextRequest{
-		SystemPrompt: `You are SIA, Solusphere's AI operations and analytics agent.
+	systemPrompt := `You are SIA, Solusphere's AI operations and analytics agent.
 Answer with accuracy, practical reasoning, and clear uncertainty.
 When web search is available and the question may depend on current public information, search the web before answering.
 Research must be based on multiple independent sources whenever available.
@@ -86,8 +89,13 @@ Do not rely on a single source for a research answer unless only one credible so
 Compare sources when they disagree and explain which source is most authoritative for each claim.
 For website analysis, inspect and summarize the public facts you can verify, then give actionable recommendations.
 For analytics questions, structure the answer with findings, likely drivers, risks, and next actions.
-Do not invent facts, metrics, prices, policies, or source claims. Cite web sources when you use them.`,
+When images are attached, visually inspect them and ground your answer in what you actually see.
+Do not invent facts, metrics, prices, policies, or source claims. Cite web sources when you use them.`
+
+	result, err := ai.GenerateTextResultWithDefault(ctx, ai.GenerateTextRequest{
+		SystemPrompt:    systemPrompt,
 		UserPrompt:      userMessage,
+		Images:          images,
 		MaxOutputTokens: 1200,
 		Temperature:     0.3,
 		WebSearch:       webSearch,

@@ -23,10 +23,18 @@ type Message struct {
 	Content string
 }
 
+// ImageInput is an image passed to a multimodal Responses API call.
+// ImageURL should be a data URL (data:image/...;base64,...) or a publicly reachable URL.
+type ImageInput struct {
+	ImageURL string
+	Detail   string
+}
+
 type GenerateTextRequest struct {
 	SystemPrompt    string
 	UserPrompt      string
 	Messages        []Message
+	Images          []ImageInput
 	MaxOutputTokens int
 	Temperature     float64
 	WebSearch       bool
@@ -63,7 +71,7 @@ func NewOpenAIClient(apiKey, model string) (*OpenAIClient, error) {
 	model = NormalizeOpenAIModel(model)
 
 	client := resty.New().
-		SetTimeout(60 * time.Second).
+		SetTimeout(120 * time.Second).
 		SetRetryCount(2).
 		SetRetryWaitTime(500 * time.Millisecond).
 		SetRetryMaxWaitTime(3 * time.Second)
@@ -220,31 +228,99 @@ func (c *OpenAIClient) GenerateTextResult(ctx context.Context, req GenerateTextR
 	}, nil
 }
 
-func buildInput(req GenerateTextRequest) []map[string]string {
+func buildInput(req GenerateTextRequest) []map[string]interface{} {
 	messages := req.Messages
 	if len(messages) == 0 {
 		messages = []Message{{Role: "user", Content: req.UserPrompt}}
 	}
 
-	input := make([]map[string]string, 0, len(messages))
-	for _, msg := range messages {
+	input := make([]map[string]interface{}, 0, len(messages))
+	for i, msg := range messages {
 		content := strings.TrimSpace(msg.Content)
-		if content == "" {
+		role := normalizeRole(msg.Role)
+		isLastUser := i == len(messages)-1 && role == "user"
+		images := []ImageInput(nil)
+		if isLastUser {
+			images = req.Images
+		}
+
+		if content == "" && len(images) == 0 {
 			continue
 		}
 
-		role := normalizeRole(msg.Role)
-		input = append(input, map[string]string{
+		if len(images) == 0 {
+			input = append(input, map[string]interface{}{
+				"role":    role,
+				"content": content,
+			})
+			continue
+		}
+
+		parts := make([]map[string]interface{}, 0, 1+len(images))
+		if content != "" {
+			parts = append(parts, map[string]interface{}{
+				"type": "input_text",
+				"text": content,
+			})
+		}
+		for _, img := range images {
+			url := strings.TrimSpace(img.ImageURL)
+			if url == "" {
+				continue
+			}
+			detail := strings.TrimSpace(img.Detail)
+			if detail == "" {
+				detail = "auto"
+			}
+			parts = append(parts, map[string]interface{}{
+				"type":      "input_image",
+				"image_url": url,
+				"detail":    detail,
+			})
+		}
+		if len(parts) == 0 {
+			continue
+		}
+		input = append(input, map[string]interface{}{
 			"role":    role,
-			"content": content,
+			"content": parts,
 		})
 	}
 
 	if len(input) == 0 {
-		input = append(input, map[string]string{
-			"role":    "user",
-			"content": req.UserPrompt,
-		})
+		prompt := strings.TrimSpace(req.UserPrompt)
+		if prompt == "" {
+			prompt = "Describe the attached image(s)."
+		}
+		if len(req.Images) == 0 {
+			input = append(input, map[string]interface{}{
+				"role":    "user",
+				"content": prompt,
+			})
+		} else {
+			parts := []map[string]interface{}{
+				{"type": "input_text", "text": prompt},
+			}
+			for _, img := range req.Images {
+				url := strings.TrimSpace(img.ImageURL)
+				if url == "" {
+					continue
+				}
+				detail := strings.TrimSpace(img.Detail)
+				if detail == "" {
+					detail = "auto"
+				}
+				parts = append(parts, map[string]interface{}{
+					"type":      "input_image",
+					"image_url": url,
+					"detail":    detail,
+				})
+			}
+			input = append(input, map[string]interface{}{
+				"role":    "user",
+				"content": parts,
+			})
+		}
 	}
 
 	return input

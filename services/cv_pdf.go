@@ -109,7 +109,7 @@ func (s *CVPDFService) drawPage1(pdf *fpdf.Fpdf, profile *models.CVProfile) {
 	setCV_Black(pdf)
 	profileText := profile.ProfileText
 	if profileText == "" {
-		profileText = "[Insert profile. Should be no longer than 80 words]."
+		profileText = "[Insert profile summary]."
 	}
 	pdf.MultiCell(cvCol1W, 4, profileText, "", "L", false)
 	leftY = pdf.GetY() + 5
@@ -122,7 +122,7 @@ func (s *CVPDFService) drawPage1(pdf *fpdf.Fpdf, profile *models.CVProfile) {
 	setCV_Black(pdf)
 	vp := profile.ValueProposition
 	if vp == "" {
-		vp = "[Insert value proposition. This is how the user applies their skills in a way that produces any outcome or solves a problem. Should be no longer than 150 words]"
+		vp = "[Insert value proposition. Describe how you apply your skills to produce outcomes or solve problems.]"
 	}
 	pdf.MultiCell(cvCol1W, 4, vp, "", "L", false)
 

@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestNormalizeDocumentTextTrimsAndLimits(t *testing.T) {
+func TestNormalizeDocumentTextTrims(t *testing.T) {
 	input := "  Hello   world  \n\nSecond line  "
 	got := normalizeDocumentText(input)
 	want := "Hello   world  \n\nSecond line"
@@ -13,10 +13,10 @@ func TestNormalizeDocumentTextTrimsAndLimits(t *testing.T) {
 		t.Fatalf("normalizeDocumentText() = %q, want %q", got, want)
 	}
 
-	long := strings.Repeat("a", maxDocumentTextRunes+100)
+	long := strings.Repeat("a", 60000)
 	got = normalizeDocumentText(long)
-	if len([]rune(got)) != maxDocumentTextRunes {
-		t.Fatalf("expected %d runes, got %d", maxDocumentTextRunes, len([]rune(got)))
+	if len([]rune(got)) != 60000 {
+		t.Fatalf("expected full document text without truncation, got %d runes", len([]rune(got)))
 	}
 }
 

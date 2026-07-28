@@ -13,7 +13,10 @@ import (
 	"github.com/ledongthuc/pdf"
 )
 
-const maxDocumentTextRunes = 50000
+var (
+	docxTagPattern   = regexp.MustCompile(`<[^>]+>`)
+	docxSpacePattern = regexp.MustCompile(`[ \t\f\v]+`)
+)
 
 var docxTextRunPattern = regexp.MustCompile(`(?s)<w:t(?:\s[^>]*)?>(.*?)</w:t>`)
 
@@ -142,16 +145,29 @@ func ExtractTextFromPDFBytes(data []byte) (string, int, error) {
 	return ReadPDFDocumentText(path)
 }
 
+// ExtractTextFromDOCXBytes is kept as an alias for callers that pass raw bytes + extension.
+func ExtractTextFromDOCXBytes(data []byte) (string, error) {
+	return ExtractTextFromDocxBytes(data)
+}
+
+// ExtractTextFromCVDocumentBytes extracts text from PDF or DOCX bytes.
+func ExtractTextFromCVDocumentBytes(data []byte, ext string) (string, error) {
+	switch strings.ToLower(ext) {
+	case ".pdf":
+		text, _, err := ExtractTextFromPDFBytes(data)
+		return text, err
+	case ".docx":
+		return ExtractTextFromDocxBytes(data)
+	default:
+		return "", fmt.Errorf("unsupported document type %q", ext)
+	}
+}
+
 func normalizeDocumentText(text string) string {
 	text = strings.ReplaceAll(text, "\r\n", "\n")
 	text = strings.ReplaceAll(text, "\r", "\n")
 	text = strings.Join(strings.FieldsFunc(text, func(r rune) bool {
 		return r == '\u0000'
 	}), "\n")
-	text = strings.TrimSpace(text)
-	if len([]rune(text)) > maxDocumentTextRunes {
-		runes := []rune(text)
-		text = string(runes[:maxDocumentTextRunes])
-	}
-	return text
+	return strings.TrimSpace(text)
 }

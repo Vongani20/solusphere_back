@@ -33,6 +33,44 @@ func TestGenerateCVPDFMatchesTemplateBasics(t *testing.T) {
 	}
 }
 
+func TestGenerateCVPDFHandlesUnicodeWithoutPanic(t *testing.T) {
+	svc := NewCVPDFService()
+	profile := sampleCVProfile()
+	profile.ProfileText = "Led the team’s delivery — “on time”… with café résumé skills"
+	profile.ValueProposition = "Don’t settle for “good enough”"
+	profile.Experience = []models.CVExperience{
+		{
+			Company:     "O’Reilly & Partners",
+			Position:    "Senior Analyst – Insights",
+			PeriodStart: "2020-01",
+			ScopeOfWork: []string{
+				"Owned stakeholder’s roadmap — end-to-end delivery",
+				"Improved NPS from “fair” to “great”… continuously",
+			},
+		},
+	}
+	profile.ProfessionalSkills = []models.ProfessionalSkill{
+		{Skill: "Communication", Details: []string{"Executive briefings — C-suite"}},
+	}
+
+	pdf, err := svc.GeneratePDF(profile)
+	if err != nil {
+		t.Fatalf("GeneratePDF with unicode failed: %v", err)
+	}
+	if !strings.HasPrefix(string(pdf), "%PDF") {
+		t.Fatalf("expected PDF output, got %d bytes", len(pdf))
+	}
+}
+
+func TestPDFSafeTextMapsCommonUnicode(t *testing.T) {
+	in := "team’s “quote” — café…"
+	got := pdfSafeText(in)
+	want := "team's \"quote\" - café..."
+	if got != want {
+		t.Fatalf("pdfSafeText(%q) = %q, want %q", in, got, want)
+	}
+}
+
 func TestGenerateCVWordMatchesTemplateBasics(t *testing.T) {
 	svc := NewCVPDFService()
 	if len(cvMasterTemplateDocx) == 0 {

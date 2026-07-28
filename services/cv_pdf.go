@@ -57,6 +57,8 @@ func (s *CVPDFService) GeneratePDF(profile *models.CVProfile) ([]byte, error) {
 	}
 	// Export the full CV — do not truncate fields for template fit.
 	models.SanitizeCVProfile(profile)
+	// gofpdf Helvetica is WinAnsi/Latin-1 only; Unicode (curly quotes, etc.) panics.
+	pdfSafeProfile(profile)
 
 	pdf := fpdf.New("P", "mm", "A4", "")
 	pdf.SetMargins(cvML, cvMT, cvMR)
@@ -171,7 +173,7 @@ func (s *CVPDFService) drawSidebarContinuation(pdf *fpdf.Fpdf, profile *models.C
 	pdf.SetXY(innerX, rightY)
 	pdf.SetFont("Helvetica", "I", 7.5)
 	setCV_Gray(pdf)
-	pdf.CellFormat(innerW, 4, "Continued…", "", 1, "L", false, 0, "")
+	pdf.CellFormat(innerW, 4, "Continued...", "", 1, "L", false, 0, "")
 	setCV_Black(pdf)
 	rightY += 5
 
@@ -631,7 +633,7 @@ func (s *CVPDFService) drawBulletList(pdf *fpdf.Fpdf, items []string, placeholde
 }
 
 func (s *CVPDFService) drawWrappedLines(pdf *fpdf.Fpdf, x, y, w, lineH float64, text string, maxY float64) float64 {
-	lines := pdf.SplitText(text, w)
+	lines := pdf.SplitText(pdfSafeText(text), w)
 	if len(lines) == 0 {
 		return y
 	}
@@ -698,6 +700,84 @@ func imageTypeFromSource(rawURL, contentType string) string {
 		return "PNG"
 	}
 	return "JPEG"
+}
+
+// pdfSafeText maps text to WinAnsi/Latin-1 so gofpdf Helvetica does not panic on
+// Unicode code points (e.g. curly apostrophe U+2019 -> index out of range).
+func pdfSafeText(s string) string {
+	if s == "" {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch r {
+		case '\n', '\r', '\t':
+			b.WriteRune(r)
+		case '\u00a0':
+			b.WriteByte(' ')
+		case '\u2018', '\u2019', '\u201a', '\u2032', '`', '´':
+			b.WriteByte('\'')
+		case '\u201c', '\u201d', '\u201e', '\u201f', '\u2033':
+			b.WriteByte('"')
+		case '\u2013', '\u2014', '\u2212':
+			b.WriteByte('-')
+		case '\u2026':
+			b.WriteString("...")
+		case '\u2022', '\u25cf', '\u25aa', '\u25e6', '\u00b7', '\u2043':
+			b.WriteByte('-')
+		default:
+			if r < 32 {
+				continue
+			}
+			if r > 255 {
+				b.WriteByte('?')
+				continue
+			}
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func pdfSafeProfile(p *models.CVProfile) {
+	if p == nil {
+		return
+	}
+	p.FirstName = pdfSafeText(p.FirstName)
+	p.LastName = pdfSafeText(p.LastName)
+	p.Gender = pdfSafeText(p.Gender)
+	p.Nationality = pdfSafeText(p.Nationality)
+	p.DateOfBirth = pdfSafeText(p.DateOfBirth)
+	p.ProfileText = pdfSafeText(p.ProfileText)
+	p.ValueProposition = pdfSafeText(p.ValueProposition)
+	for i := range p.ProfessionalSkills {
+		p.ProfessionalSkills[i].Skill = pdfSafeText(p.ProfessionalSkills[i].Skill)
+		for j := range p.ProfessionalSkills[i].Details {
+			p.ProfessionalSkills[i].Details[j] = pdfSafeText(p.ProfessionalSkills[i].Details[j])
+		}
+	}
+	for i := range p.Qualifications {
+		p.Qualifications[i] = pdfSafeText(p.Qualifications[i])
+	}
+	for i := range p.ComputerSkills {
+		p.ComputerSkills[i] = pdfSafeText(p.ComputerSkills[i])
+	}
+	for i := range p.ProfessionalMemberships {
+		p.ProfessionalMemberships[i] = pdfSafeText(p.ProfessionalMemberships[i])
+	}
+	for i := range p.Languages {
+		p.Languages[i] = pdfSafeText(p.Languages[i])
+	}
+	for i := range p.Experience {
+		p.Experience[i].Company = pdfSafeText(p.Experience[i].Company)
+		p.Experience[i].Position = pdfSafeText(p.Experience[i].Position)
+		p.Experience[i].PeriodStart = pdfSafeText(p.Experience[i].PeriodStart)
+		p.Experience[i].PeriodEnd = pdfSafeText(p.Experience[i].PeriodEnd)
+		for j := range p.Experience[i].ScopeOfWork {
+			p.Experience[i].ScopeOfWork[j] = pdfSafeText(p.Experience[i].ScopeOfWork[j])
+		}
+	}
 }
 
 func formatCVDate(s string) string {

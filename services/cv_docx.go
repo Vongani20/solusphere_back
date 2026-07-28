@@ -468,6 +468,36 @@ func cvDocxPhotoPNG(photoURL string) []byte {
 		return nil
 	}
 
+	// Cap decoded size so huge uploads cannot stall Word export / gateway timeouts.
+	const maxDim = 1200
+	if w > maxDim || h > maxDim {
+		scale := float64(maxDim) / float64(w)
+		if h > w {
+			scale = float64(maxDim) / float64(h)
+		}
+		nw := int(float64(w)*scale + 0.5)
+		nh := int(float64(h)*scale + 0.5)
+		if nw < 1 {
+			nw = 1
+		}
+		if nh < 1 {
+			nh = 1
+		}
+		resized := image.NewRGBA(image.Rect(0, 0, nw, nh))
+		draw.Draw(resized, resized.Bounds(), image.NewUniform(color.White), image.Point{}, draw.Src)
+		// Nearest-neighbor shrink is enough for a small CV photo frame.
+		for y := 0; y < nh; y++ {
+			sy := bounds.Min.Y + y*h/nh
+			for x := 0; x < nw; x++ {
+				sx := bounds.Min.X + x*w/nw
+				resized.Set(x, y, img.At(sx, sy))
+			}
+		}
+		img = resized
+		bounds = img.Bounds()
+		w, h = bounds.Dx(), bounds.Dy()
+	}
+
 	// Grow the canvas (never crop) so its aspect ratio matches the frame.
 	canvasW, canvasH := w, h
 	if float64(w)/float64(h) > cvDocxPhotoRatio {

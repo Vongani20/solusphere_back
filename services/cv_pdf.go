@@ -21,11 +21,15 @@ const (
 	cvML    = 12.0
 	cvMR    = 12.0
 	cvMT    = 10.0
-	cvCol1X = cvML
-	cvCol1W = 63.0
-	cvGap   = 5.0
-	cvCol2X = cvCol1X + cvCol1W + cvGap
-	cvCol2W = cvPageW - cvMR - cvCol2X
+	cvLogoW = 52.0
+	cvLogoH = 18.0
+	// Keep right-column panels below the brand logo so they never cover it.
+	cvHeaderBottom = cvMT + cvLogoH + 2
+	cvCol1X        = cvML
+	cvCol1W        = 63.0
+	cvGap          = 5.0
+	cvCol2X        = cvCol1X + cvCol1W + cvGap
+	cvCol2W        = cvPageW - cvMR - cvCol2X
 )
 
 // Brand colours aligned with the SoluGrowth CV template.
@@ -116,9 +120,7 @@ type cvSidebarCursor struct {
 }
 
 func (s *CVPDFService) drawPage1(pdf *fpdf.Fpdf, profile *models.CVProfile) cvSidebarCursor {
-	logoW, logoH := 52.0, 18.0
-	logoX := cvPageW - cvMR - logoW
-	s.drawBrandHeader(pdf, logoX, cvMT, logoW, logoH)
+	logoX := cvPageW - cvMR - cvLogoW
 
 	pdf.SetXY(cvML, cvMT)
 	pdf.SetFont("Helvetica", "B", 17)
@@ -135,7 +137,7 @@ func (s *CVPDFService) drawPage1(pdf *fpdf.Fpdf, profile *models.CVProfile) cvSi
 	pdf.CellFormat(availW, 5, "CURRICULUM VITAE", "", 1, "L", false, 0, "")
 	setCV_Black(pdf)
 
-	contentTopY := cvMT + 16
+	contentTopY := cvHeaderBottom
 	leftY := contentTopY
 
 	photoH := 52.0
@@ -150,6 +152,8 @@ func (s *CVPDFService) drawPage1(pdf *fpdf.Fpdf, profile *models.CVProfile) cvSi
 	boxH := cvContentBottom - boxTop - 2
 	pdf.SetFillColor(cvSideR, cvSideG, cvSideB)
 	pdf.Rect(cvCol2X, boxTop, cvCol2W, boxH, "F")
+	// Draw the logo after the sidebar fill so it is never covered.
+	s.drawBrandHeader(pdf, logoX, cvMT, cvLogoW, cvLogoH)
 
 	innerX := cvCol2X + 4
 	innerW := cvCol2W - 8
@@ -164,14 +168,14 @@ func (s *CVPDFService) drawPage1(pdf *fpdf.Fpdf, profile *models.CVProfile) cvSi
 }
 
 func (s *CVPDFService) drawSidebarContinuation(pdf *fpdf.Fpdf, profile *models.CVProfile, start cvSidebarCursor) cvSidebarCursor {
-	logoW, logoH := 52.0, 18.0
-	logoX := cvPageW - cvMR - logoW
-	s.drawBrandHeader(pdf, logoX, cvMT, logoW, logoH)
+	logoX := cvPageW - cvMR - cvLogoW
 
-	boxTop := cvMT + 8
+	boxTop := cvHeaderBottom
 	boxH := cvContentBottom - boxTop - 2
 	pdf.SetFillColor(cvSideR, cvSideG, cvSideB)
 	pdf.Rect(cvCol2X, boxTop, cvCol2W, boxH, "F")
+	// Logo last so continuation panels cannot cover the brand mark.
+	s.drawBrandHeader(pdf, logoX, cvMT, cvLogoW, cvLogoH)
 
 	innerX := cvCol2X + 4
 	innerW := cvCol2W - 8
@@ -384,9 +388,8 @@ func (s *CVPDFService) drawExperiencePages(pdf *fpdf.Fpdf, profile *models.CVPro
 }
 
 func (s *CVPDFService) drawExperienceHeader(pdf *fpdf.Fpdf) {
-	logoW, logoH := 52.0, 18.0
-	logoX := cvPageW - cvMR - logoW
-	s.drawBrandHeader(pdf, logoX, cvMT, logoW, logoH)
+	logoX := cvPageW - cvMR - cvLogoW
+	s.drawBrandHeader(pdf, logoX, cvMT, cvLogoW, cvLogoH)
 
 	pdf.SetXY(cvML, cvMT)
 	pdf.SetFont("Helvetica", "B", 11)

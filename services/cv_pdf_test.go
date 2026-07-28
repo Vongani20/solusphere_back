@@ -71,6 +71,39 @@ func TestPDFSafeTextMapsCommonUnicode(t *testing.T) {
 	}
 }
 
+func TestPDFHeaderClearsLogoHeight(t *testing.T) {
+	if cvHeaderBottom <= cvMT+cvLogoH {
+		t.Fatalf("cvHeaderBottom=%.1f must be below logo bottom %.1f", cvHeaderBottom, cvMT+cvLogoH)
+	}
+}
+
+func TestGenerateCVPDFSidebarContinuationDoesNotPanic(t *testing.T) {
+	svc := NewCVPDFService()
+	profile := sampleCVProfile()
+	// Force sidebar overflow onto a continuation page under the logo column.
+	langs := make([]string, 40)
+	for i := range langs {
+		langs[i] = fmt.Sprintf("Language %02d with extra wording to wrap lines", i+1)
+	}
+	profile.Languages = langs
+	profile.Qualifications = []string{"Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7", "Q8"}
+	profile.ComputerSkills = []string{"C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8"}
+	profile.ProfessionalMemberships = []string{"M1", "M2", "M3", "M4", "M5"}
+	profile.ProfessionalSkills = []models.ProfessionalSkill{
+		{Skill: "Skill A", Details: []string{"d1", "d2", "d3", "d4"}},
+		{Skill: "Skill B", Details: []string{"d1", "d2", "d3"}},
+		{Skill: "Skill C", Details: []string{"d1", "d2"}},
+	}
+
+	pdf, err := svc.GeneratePDF(profile)
+	if err != nil {
+		t.Fatalf("GeneratePDF failed: %v", err)
+	}
+	if !strings.HasPrefix(string(pdf), "%PDF") {
+		t.Fatalf("expected PDF output, got %d bytes", len(pdf))
+	}
+}
+
 func TestGenerateCVWordMatchesTemplateBasics(t *testing.T) {
 	svc := NewCVPDFService()
 	if len(cvMasterTemplateDocx) == 0 {

@@ -34,7 +34,8 @@ func (s *CVPDFService) GenerateWord(profile *models.CVProfile) ([]byte, error) {
 	if profile == nil {
 		return nil, fmt.Errorf("profile is required")
 	}
-	profile = FitCVProfileForTemplate(profile)
+	models.SanitizeCVProfile(profile)
+	// Keep full CV content in Word export as well.
 
 	reader, err := zip.NewReader(bytes.NewReader(cvMasterTemplateDocx), int64(len(cvMasterTemplateDocx)))
 	if err != nil {

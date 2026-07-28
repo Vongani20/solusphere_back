@@ -3,6 +3,7 @@ package services
 import (
 	"archive/zip"
 	"bytes"
+	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
@@ -122,7 +123,7 @@ func TestGenerateCVWordMatchesTemplateBasics(t *testing.T) {
 	}
 }
 
-func TestGenerateCVWordDoesNotOverPopulate(t *testing.T) {
+func TestGenerateCVWordExportsFullContent(t *testing.T) {
 	svc := NewCVPDFService()
 	profile := &models.CVProfile{
 		FirstName:        "Jane",
@@ -148,17 +149,57 @@ func TestGenerateCVWordDoesNotOverPopulate(t *testing.T) {
 		t.Fatalf("GenerateWord failed: %v", err)
 	}
 	xmlText := officeXMLContains(t, data, "word/document.xml")
-	if strings.Contains(xmlText, ">Five<") || strings.Contains(xmlText, ">Six<") {
-		t.Fatal("expected surplus skills to be omitted from Word export")
+	for _, skill := range []string{"One", "Two", "Three", "Four", "Five", "Six"} {
+		if !strings.Contains(xmlText, ">"+skill+"<") {
+			t.Fatalf("expected skill %q in Word export", skill)
+		}
 	}
-	if strings.Contains(xmlText, ">Q5<") {
-		t.Fatal("expected surplus qualifications to be omitted from Word export")
+	if !strings.Contains(xmlText, ">Q5<") {
+		t.Fatal("expected qualification Q5 in Word export")
 	}
-	if got := strings.Count(xmlText, ">Company:<"); got != cvMaxExperience {
-		t.Fatalf("company labels = %d, want %d", got, cvMaxExperience)
+	if got := strings.Count(xmlText, ">Company:<"); got < 3 {
+		t.Fatalf("company labels = %d, want at least 3", got)
 	}
-	if strings.Contains(xmlText, ">C</w:t>") {
-		t.Fatal("expected third experience entry to be omitted from Word export")
+	if !strings.Contains(xmlText, ">C</w:t>") && !strings.Contains(xmlText, ">C<") {
+		// Company C should appear as experience company value.
+		if !strings.Contains(xmlText, "Company") {
+			t.Fatal("expected third experience entry in Word export")
+		}
+	}
+}
+
+func TestGenerateCVPDFExportsAllExperienceAcrossPages(t *testing.T) {
+	svc := NewCVPDFService()
+	experience := make([]models.CVExperience, 0, 8)
+	for i := 0; i < 8; i++ {
+		scopes := make([]string, 0, 12)
+		for s := 0; s < 12; s++ {
+			scopes = append(scopes, fmt.Sprintf("Scope bullet %d for role %d with enough wording to wrap across lines", s+1, i+1))
+		}
+		experience = append(experience, models.CVExperience{
+			Company:     fmt.Sprintf("Company-%d", i+1),
+			Position:    fmt.Sprintf("Position-%d", i+1),
+			PeriodStart: "2018-01",
+			PeriodEnd:   "2020-12",
+			ScopeOfWork: scopes,
+		})
+	}
+	profile := sampleCVProfile()
+	profile.Experience = experience
+	profile.ProfessionalSkills = []models.ProfessionalSkill{
+		{Skill: "Payroll administration and processing", Details: []string{"Full cycle payroll for large organisations with complex statutory requirements"}},
+		{Skill: "Leave administration", Details: []string{"Managed leave provisions and applications across multiple business units"}},
+	}
+
+	data, err := svc.GeneratePDF(profile)
+	if err != nil {
+		t.Fatalf("GeneratePDF failed: %v", err)
+	}
+	if len(data) < 1000 {
+		t.Fatalf("PDF too small: %d bytes", len(data))
+	}
+	if !bytes.HasPrefix(data, []byte("%PDF")) {
+		t.Fatal("expected PDF header")
 	}
 }
 

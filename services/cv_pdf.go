@@ -64,10 +64,10 @@ func (s *CVPDFService) GeneratePDF(profile *models.CVProfile) ([]byte, error) {
 	pdf.AliasNbPages("")
 
 	pdf.AddPage()
-	pending := s.drawPage1(pdf, profile)
-	for pending != cvSectionDone {
+	cursor := s.drawPage1(pdf, profile)
+	for safety := 0; cursor.section != cvSectionDone && safety < 40; safety++ {
 		pdf.AddPage()
-		pending = s.drawSidebarContinuation(pdf, profile, pending)
+		cursor = s.drawSidebarContinuation(pdf, profile, cursor)
 	}
 
 	pdf.AddPage()
@@ -100,7 +100,12 @@ const (
 	cvSectionDone
 )
 
-func (s *CVPDFService) drawPage1(pdf *fpdf.Fpdf, profile *models.CVProfile) cvSidebarSection {
+type cvSidebarCursor struct {
+	section cvSidebarSection
+	index   int
+}
+
+func (s *CVPDFService) drawPage1(pdf *fpdf.Fpdf, profile *models.CVProfile) cvSidebarCursor {
 	logoW, logoH := 52.0, 18.0
 	logoX := cvPageW - cvMR - logoW
 	s.drawBrandHeader(pdf, logoX, cvMT, logoW, logoH)
@@ -145,10 +150,10 @@ func (s *CVPDFService) drawPage1(pdf *fpdf.Fpdf, profile *models.CVProfile) cvSi
 	rightY = s.drawPersonalDetails(pdf, profile, innerX, rightY, innerW)
 	rightY += 3
 
-	return s.drawSidebarFrom(pdf, profile, cvSectionSkills, innerX, rightY, innerW, maxY)
+	return s.drawSidebarFrom(pdf, profile, cvSidebarCursor{section: cvSectionSkills}, innerX, rightY, innerW, maxY)
 }
 
-func (s *CVPDFService) drawSidebarContinuation(pdf *fpdf.Fpdf, profile *models.CVProfile, start cvSidebarSection) cvSidebarSection {
+func (s *CVPDFService) drawSidebarContinuation(pdf *fpdf.Fpdf, profile *models.CVProfile, start cvSidebarCursor) cvSidebarCursor {
 	logoW, logoH := 52.0, 18.0
 	logoX := cvPageW - cvMR - logoW
 	s.drawBrandHeader(pdf, logoX, cvMT, logoW, logoH)
@@ -173,64 +178,75 @@ func (s *CVPDFService) drawSidebarContinuation(pdf *fpdf.Fpdf, profile *models.C
 	return s.drawSidebarFrom(pdf, profile, start, innerX, rightY, innerW, maxY)
 }
 
-func (s *CVPDFService) drawSidebarFrom(pdf *fpdf.Fpdf, profile *models.CVProfile, start cvSidebarSection, x, y, w, maxY float64) cvSidebarSection {
-	sections := []struct {
-		id        cvSidebarSection
-		title     string
-		icon      string
-		drawAfter func(float64) float64
-	}{
-		{cvSectionSkills, "PROFESSIONAL SKILLS", "S", func(yy float64) float64 {
-			return s.drawSkillsList(pdf, profile.ProfessionalSkills, x, yy, w, maxY)
+func (s *CVPDFService) drawSidebarFrom(pdf *fpdf.Fpdf, profile *models.CVProfile, start cvSidebarCursor, x, y, w, maxY float64) cvSidebarCursor {
+	type sectionDef struct {
+		id    cvSidebarSection
+		title string
+		icon  string
+		draw  func(startIdx int, yy float64) (float64, int, bool)
+	}
+
+	sections := []sectionDef{
+		{cvSectionSkills, "PROFESSIONAL SKILLS", "S", func(startIdx int, yy float64) (float64, int, bool) {
+			return s.drawSkillsList(pdf, profile.ProfessionalSkills, x, yy, w, maxY, startIdx)
 		}},
-		{cvSectionQualifications, "QUALIFICATIONS AND TRAINING", "Q", func(yy float64) float64 {
-			return s.drawBulletList(pdf, profile.Qualifications, "[Insert qualification]", x, yy, w, maxY)
+		{cvSectionQualifications, "QUALIFICATIONS AND TRAINING", "Q", func(startIdx int, yy float64) (float64, int, bool) {
+			return s.drawBulletList(pdf, profile.Qualifications, "[Insert qualification]", x, yy, w, maxY, startIdx)
 		}},
-		{cvSectionComputer, "COMPUTER SKILLS", "C", func(yy float64) float64 {
-			return s.drawBulletList(pdf, profile.ComputerSkills, "[Insert skills]", x, yy, w, maxY)
+		{cvSectionComputer, "COMPUTER SKILLS", "C", func(startIdx int, yy float64) (float64, int, bool) {
+			return s.drawBulletList(pdf, profile.ComputerSkills, "[Insert skills]", x, yy, w, maxY, startIdx)
 		}},
-		{cvSectionMemberships, "PROFESSIONAL MEMBERSHIP", "M", func(yy float64) float64 {
-			return s.drawBulletList(pdf, profile.ProfessionalMemberships, "[Insert memberships]", x, yy, w, maxY)
+		{cvSectionMemberships, "PROFESSIONAL MEMBERSHIP", "M", func(startIdx int, yy float64) (float64, int, bool) {
+			return s.drawBulletList(pdf, profile.ProfessionalMemberships, "[Insert memberships]", x, yy, w, maxY, startIdx)
 		}},
-		{cvSectionLanguages, "LANGUAGES", "L", func(yy float64) float64 {
-			return s.drawBulletList(pdf, profile.Languages, "[Insert language(s)]", x, yy, w, maxY)
+		{cvSectionLanguages, "LANGUAGES", "L", func(startIdx int, yy float64) (float64, int, bool) {
+			return s.drawBulletList(pdf, profile.Languages, "[Insert language(s)]", x, yy, w, maxY, startIdx)
 		}},
 	}
 
 	active := false
 	for _, section := range sections {
-		if section.id == start {
+		if section.id == start.section {
 			active = true
 		}
 		if !active {
 			continue
 		}
+
+		startIdx := 0
+		if section.id == start.section {
+			startIdx = start.index
+		}
 		if y+8 > maxY {
-			return section.id
+			return cvSidebarCursor{section: section.id, index: startIdx}
 		}
-		y = s.drawRightHeading(pdf, section.title, section.icon, x, y, w)
-		before := y
-		y = section.drawAfter(y)
-		if y < 0 {
-			// Negative sentinel means section overflowed mid-draw; restart this section next page.
-			return section.id
+
+		// Only redraw heading when starting the section (or continuing with remaining items).
+		if startIdx == 0 {
+			y = s.drawRightHeading(pdf, section.title, section.icon, x, y, w)
+		} else {
+			pdf.SetXY(x, y)
+			pdf.SetFont("Helvetica", "I", 7)
+			setCV_Gray(pdf)
+			pdf.CellFormat(w, 4, section.title+" (continued)", "", 1, "L", false, 0, "")
+			setCV_Black(pdf)
+			y += 4
 		}
-		if y == before && section.id >= start {
-			// Nothing drawn and no room — continue section next page.
-			if y+6 > maxY {
-				return section.id
-			}
+
+		nextY, nextIdx, done := section.draw(startIdx, y)
+		if !done {
+			return cvSidebarCursor{section: section.id, index: nextIdx}
 		}
-		y += 3
+		y = nextY + 3
 		if y > maxY {
 			next := section.id + 1
 			if next >= cvSectionDone {
-				return cvSectionDone
+				return cvSidebarCursor{section: cvSectionDone}
 			}
-			return next
+			return cvSidebarCursor{section: next, index: 0}
 		}
 	}
-	return cvSectionDone
+	return cvSidebarCursor{section: cvSectionDone}
 }
 
 func (s *CVPDFService) drawLeftWrappedSection(pdf *fpdf.Fpdf, title, text, placeholder string, x, y, w, maxY float64) float64 {
@@ -525,32 +541,39 @@ func (s *CVPDFService) drawPersonalDetails(pdf *fpdf.Fpdf, profile *models.CVPro
 	return y
 }
 
-func (s *CVPDFService) drawSkillsList(pdf *fpdf.Fpdf, skills []models.ProfessionalSkill, x, y, w, maxY float64) float64 {
+func (s *CVPDFService) drawSkillsList(pdf *fpdf.Fpdf, skills []models.ProfessionalSkill, x, y, w, maxY float64, startIdx int) (float64, int, bool) {
 	lineH := 4.0
 	if len(skills) == 0 {
-		if y+lineH > maxY {
-			return -1
+		if startIdx > 0 {
+			return y, 0, true
 		}
-		pdf.SetFont("Helvetica", "", 7.5)
-		setCV_Black(pdf)
-		y = s.drawWrappedLines(pdf, x+2, y, w-2, lineH, "- [Insert skills]", maxY)
-		return y
+		nextY := s.drawWrappedLines(pdf, x+2, y, w-2, lineH, "- [Insert skills]", maxY)
+		if nextY < 0 {
+			return y, 0, false
+		}
+		return nextY, 0, true
 	}
-	for _, skill := range skills {
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	for i := startIdx; i < len(skills); i++ {
+		skill := skills[i]
 		label := skill.Skill
 		if label == "" {
 			label = "[Insert skills]"
 		}
 		pdf.SetFont("Helvetica", "B", 7.5)
 		setCV_Black(pdf)
-		before := y
-		y = s.drawWrappedLines(pdf, x+2, y, w-2, lineH, "- "+label+":", maxY)
-		if y < 0 {
-			return -1
+		nextY := s.drawWrappedLines(pdf, x+2, y, w-2, lineH, "- "+label+":", maxY)
+		if nextY < 0 {
+			// If the page is still mostly empty, skip this oversized item to avoid a hang.
+			if y < maxY-40 {
+				continue
+			}
+			return y, i, false
 		}
-		if y == before {
-			return -1
-		}
+		y = nextY
+
 		details := skill.Details
 		if len(details) == 0 {
 			details = []string{"[skill detail point if necessary]"}
@@ -560,17 +583,17 @@ func (s *CVPDFService) drawSkillsList(pdf *fpdf.Fpdf, skills []models.Profession
 				continue
 			}
 			pdf.SetFont("Helvetica", "", 7.5)
-			before = y
-			y = s.drawWrappedLines(pdf, x+7, y, w-7, lineH, "* "+d, maxY)
-			if y < 0 || y == before {
-				return -1
+			nextY = s.drawWrappedLines(pdf, x+7, y, w-7, lineH, "* "+d, maxY)
+			if nextY < 0 {
+				return y, i, false
 			}
+			y = nextY
 		}
 	}
-	return y
+	return y, len(skills), true
 }
 
-func (s *CVPDFService) drawBulletList(pdf *fpdf.Fpdf, items []string, placeholder string, x, y, w, maxY float64) float64 {
+func (s *CVPDFService) drawBulletList(pdf *fpdf.Fpdf, items []string, placeholder string, x, y, w, maxY float64, startIdx int) (float64, int, bool) {
 	lineH := 4.0
 	pdf.SetFont("Helvetica", "", 7.5)
 	setCV_Black(pdf)
@@ -582,21 +605,29 @@ func (s *CVPDFService) drawBulletList(pdf *fpdf.Fpdf, items []string, placeholde
 		}
 	}
 	if len(nonEmpty) == 0 {
-		before := y
-		y = s.drawWrappedLines(pdf, x+2, y, w-2, lineH, "- "+placeholder, maxY)
-		if y < 0 || y == before {
-			return -1
+		if startIdx > 0 {
+			return y, 0, true
 		}
-		return y
-	}
-	for _, item := range nonEmpty {
-		before := y
-		y = s.drawWrappedLines(pdf, x+2, y, w-2, lineH, "- "+item, maxY)
-		if y < 0 || y == before {
-			return -1
+		nextY := s.drawWrappedLines(pdf, x+2, y, w-2, lineH, "- "+placeholder, maxY)
+		if nextY < 0 {
+			return y, 0, false
 		}
+		return nextY, 0, true
 	}
-	return y
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	for i := startIdx; i < len(nonEmpty); i++ {
+		nextY := s.drawWrappedLines(pdf, x+2, y, w-2, lineH, "- "+nonEmpty[i], maxY)
+		if nextY < 0 {
+			if y < maxY-40 {
+				continue
+			}
+			return y, i, false
+		}
+		y = nextY
+	}
+	return y, len(nonEmpty), true
 }
 
 func (s *CVPDFService) drawWrappedLines(pdf *fpdf.Fpdf, x, y, w, lineH float64, text string, maxY float64) float64 {
@@ -639,7 +670,8 @@ func downloadImage(rawURL string) ([]byte, string, error) {
 		return data, imageTypeFromSource(rawURL, contentType), nil
 	}
 
-	resp, err := http.Get(rawURL)
+	client := &http.Client{Timeout: 8 * time.Second}
+	resp, err := client.Get(rawURL)
 	if err != nil {
 		return nil, "", err
 	}
@@ -647,7 +679,7 @@ func downloadImage(rawURL string) ([]byte, string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, "", fmt.Errorf("HTTP %d fetching image", resp.StatusCode)
 	}
-	data, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
 		return nil, "", err
 	}

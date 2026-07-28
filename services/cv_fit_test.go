@@ -3,6 +3,7 @@ package services
 import (
 	"archive/zip"
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -10,35 +11,52 @@ import (
 )
 
 func TestFitCVProfileForTemplateCapsListsAndWords(t *testing.T) {
-	longWords := strings.Repeat("word ", 200)
+	longWords := strings.Repeat("word ", cvMaxProfileWords+50)
+	skills := make([]models.ProfessionalSkill, 0, cvMaxProfessionalSkills+5)
+	for i := 0; i < cvMaxProfessionalSkills+5; i++ {
+		details := make([]string, 0, cvMaxSkillDetails+3)
+		for d := 0; d < cvMaxSkillDetails+3; d++ {
+			details = append(details, fmt.Sprintf("detail-%d-%d", i, d))
+		}
+		skills = append(skills, models.ProfessionalSkill{
+			Skill:   fmt.Sprintf("Skill-%d", i),
+			Details: details,
+		})
+	}
+	qualifications := make([]string, 0, cvMaxQualifications+5)
+	for i := 0; i < cvMaxQualifications+5; i++ {
+		qualifications = append(qualifications, fmt.Sprintf("Qualification-%d", i))
+	}
+	experience := make([]models.CVExperience, 0, cvMaxExperience+5)
+	for i := 0; i < cvMaxExperience+5; i++ {
+		scope := make([]string, 0, cvMaxScopeBullets+3)
+		for s := 0; s < cvMaxScopeBullets+3; s++ {
+			scope = append(scope, fmt.Sprintf("scope-%d-%d", i, s))
+		}
+		experience = append(experience, models.CVExperience{
+			Company:     fmt.Sprintf("Company-%d", i),
+			ScopeOfWork: scope,
+		})
+	}
+
 	profile := FitCVProfileForTemplate(&models.CVProfile{
-		FirstName:        "Jane",
-		LastName:         "Doe",
-		ProfileText:      longWords,
-		ValueProposition: longWords,
-		ProfessionalSkills: []models.ProfessionalSkill{
-			{Skill: "A", Details: []string{"1", "2", "3"}},
-			{Skill: "B", Details: []string{"1"}},
-			{Skill: "C", Details: []string{"1"}},
-			{Skill: "D", Details: []string{"1"}},
-			{Skill: "E", Details: []string{"1"}},
-		},
-		Qualifications:          []string{"1", "2", "3", "4", "5", "6"},
-		ComputerSkills:          []string{"1", "2", "3", "4", "5"},
-		ProfessionalMemberships: []string{"1", "2", "3", "4"},
-		Languages:               []string{"1", "2", "3", "4", "5"},
-		Experience: []models.CVExperience{
-			{Company: "One", ScopeOfWork: []string{"a", "b", "c", "d", "e"}},
-			{Company: "Two", ScopeOfWork: []string{"a"}},
-			{Company: "Three", ScopeOfWork: []string{"a"}},
-		},
+		FirstName:               "Jane",
+		LastName:                "Doe",
+		ProfileText:             longWords,
+		ValueProposition:        longWords,
+		ProfessionalSkills:      skills,
+		Qualifications:          qualifications,
+		ComputerSkills:          qualifications,
+		ProfessionalMemberships: qualifications,
+		Languages:               qualifications,
+		Experience:              experience,
 	})
 
-	if got := len(strings.Fields(profile.ProfileText)); got > cvMaxProfileWords {
-		t.Fatalf("profile words = %d, want <= %d", got, cvMaxProfileWords)
+	if got := len(strings.Fields(profile.ProfileText)); got != cvMaxProfileWords {
+		t.Fatalf("profile words = %d, want %d", got, cvMaxProfileWords)
 	}
-	if got := len(strings.Fields(profile.ValueProposition)); got > cvMaxValuePropWords {
-		t.Fatalf("value prop words = %d, want <= %d", got, cvMaxValuePropWords)
+	if got := len(strings.Fields(profile.ValueProposition)); got != cvMaxValuePropWords {
+		t.Fatalf("value prop words = %d, want %d", got, cvMaxValuePropWords)
 	}
 	if len(profile.ProfessionalSkills) != cvMaxProfessionalSkills {
 		t.Fatalf("skills = %d, want %d", len(profile.ProfessionalSkills), cvMaxProfessionalSkills)

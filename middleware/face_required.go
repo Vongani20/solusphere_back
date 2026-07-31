@@ -9,13 +9,16 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const faceRegistrationPath = "/api/face/register"
+const faceRegistrationPath = "/api/identity/register"
 
 var faceRegistrationExemptPaths = map[string]struct{}{
-	"/api/profile":       {},
-	faceRegistrationPath: {},
-	"/api/face/update":   {},
-	"/api/face/delete":   {},
+	"/api/profile":            {},
+	"/api/face/register":      {},
+	"/api/face/update":        {},
+	"/api/face/delete":        {},
+	"/api/identity/register":  {},
+	"/api/identity/update":    {},
+	"/api/identity/delete":    {},
 }
 
 // RequireCompletedFaceRegistration blocks protected app endpoints until a user

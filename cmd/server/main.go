@@ -427,10 +427,12 @@ func main() {
 		public.POST("/forgot-password", handlers.ForgotPassword)
 		public.POST("/reset-password", handlers.ResetPassword)
 		public.POST("/face-login", handlers.FaceLogin(rekogSvc))
+		public.POST("/scan-login", handlers.FaceLogin(rekogSvc))
 	}
 
 	// Public face recognition endpoint (for login)
 	r.POST("/api/upload-face", handlers.FaceLogin(rekogSvc))
+	r.POST("/api/auth/scan", handlers.FaceLogin(rekogSvc))
 
 	// Protected routes (require authentication)
 	protected := r.Group("/api")
@@ -446,10 +448,13 @@ func main() {
 		protected.GET("/consent", handlers.GetUserConsents)
 		protected.POST("/consent", handlers.SignUserConsent)
 
-		// Face registration - requires authentication
+		// Face / identity registration - requires authentication
 		protected.POST("/face/register", handlers.RegisterFace(rekogSvc))
 		protected.PUT("/face/update", handlers.UpdateFace(rekogSvc))
 		protected.DELETE("/face/delete", handlers.DeleteFace(rekogSvc))
+		protected.POST("/identity/register", handlers.RegisterFace(rekogSvc))
+		protected.PUT("/identity/update", handlers.UpdateFace(rekogSvc))
+		protected.DELETE("/identity/delete", handlers.DeleteFace(rekogSvc))
 
 		// Helpdesk routes
 		protected.POST("/helpdesk", handlers.SubmitTicketHandler)

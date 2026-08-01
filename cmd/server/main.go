@@ -512,7 +512,6 @@ func main() {
 		protected.POST("/chatbot/report", handlers.SIAReportHandler())
 
 		// Innovation / SoluGility
-		protected.GET("/innovation", handlers.ListMyInnovationIdeas)
 		protected.POST("/innovation", handlers.SubmitInnovationIdea)
 
 		// BPO Analysis routes

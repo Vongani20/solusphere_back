@@ -2,6 +2,9 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -166,38 +169,30 @@ func ImportCVFromDocument(c *gin.Context) {
 		return
 	}
 
-	file, err := c.FormFile("document")
+	filename, data, err := readCVImportPayload(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "CV document is required"})
+		var uploadErr *faceUploadError
+		if errors.As(err, &uploadErr) {
+			c.JSON(uploadErr.status, uploadErr.body)
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	ext := strings.ToLower(filepath.Ext(file.Filename))
+	ext := strings.ToLower(filepath.Ext(filename))
 	if ext != ".pdf" && ext != ".docx" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Only PDF and Word (.docx) files are supported"})
 		return
 	}
 
 	const maxSize = 10 << 20 // 10 MB
-	if file.Size > maxSize {
+	if int64(len(data)) > maxSize {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "File must be smaller than 10 MB"})
 		return
 	}
 
-	src, err := file.Open()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read uploaded file"})
-		return
-	}
-	defer src.Close()
-
-	data, err := io.ReadAll(src)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read uploaded file"})
-		return
-	}
-
-	text, err := services.ExtractTextFromCVUpload(file.Filename, data)
+	text, err := services.ExtractTextFromCVUpload(filename, data)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Could not read text from document. Try a text-based PDF or .docx export.", "details": err.Error()})
 		return
@@ -218,6 +213,86 @@ func ImportCVFromDocument(c *gin.Context) {
 		"warnings": warnings,
 		"message":  "CV imported. Review the form and save when ready.",
 	})
+}
+
+type cvImportJSONRequest struct {
+	Document string `json:"document"`
+	Filename string `json:"filename"`
+}
+
+func readCVImportPayload(c *gin.Context) (string, []byte, error) {
+	contentType := strings.ToLower(strings.TrimSpace(c.GetHeader("Content-Type")))
+	if strings.HasPrefix(contentType, "application/json") {
+		const maxSize = 10 << 20
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxSize+8192)
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			return "", nil, &faceUploadError{
+				status: http.StatusBadRequest,
+				body:   gin.H{"error": "Failed to read request body"},
+			}
+		}
+
+		var req cvImportJSONRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			return "", nil, &faceUploadError{
+				status: http.StatusBadRequest,
+				body: gin.H{
+					"error":   "Invalid request body",
+					"message": "Expected JSON {\"document\":\"<base64>\",\"filename\":\"cv.pdf\"}",
+				},
+			}
+		}
+
+		filename := strings.TrimSpace(req.Filename)
+		if filename == "" {
+			filename = "document.pdf"
+		}
+		filename = filepath.Base(filename)
+
+		payload := strings.TrimSpace(req.Document)
+		if payload == "" {
+			return "", nil, &faceUploadError{
+				status: http.StatusBadRequest,
+				body:   gin.H{"error": "Document is required"},
+			}
+		}
+		if idx := strings.Index(payload, ","); idx >= 0 && strings.Contains(strings.ToLower(payload[:idx]), "base64") {
+			payload = payload[idx+1:]
+		}
+		data, err := base64.StdEncoding.DecodeString(payload)
+		if err != nil {
+			data, err = base64.RawStdEncoding.DecodeString(payload)
+		}
+		if err != nil || len(data) == 0 {
+			return "", nil, &faceUploadError{
+				status: http.StatusBadRequest,
+				body: gin.H{
+					"error":   "Invalid document encoding",
+					"message": "Document must be valid base64",
+				},
+			}
+		}
+		return filename, data, nil
+	}
+
+	file, err := c.FormFile("document")
+	if err != nil {
+		return "", nil, errors.New("CV document is required")
+	}
+	if file.Size > 10<<20 {
+		return "", nil, errors.New("File must be smaller than 10 MB")
+	}
+	src, err := file.Open()
+	if err != nil {
+		return "", nil, errors.New("Failed to read uploaded file")
+	}
+	defer src.Close()
+	data, err := io.ReadAll(src)
+	if err != nil {
+		return "", nil, errors.New("Failed to read uploaded file")
+	}
+	return file.Filename, data, nil
 }
 
 // UploadCVPhoto handles profile photo upload, stores in S3, and updates the CV record.

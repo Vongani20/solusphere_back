@@ -19,6 +19,7 @@ func EnsureChatAndCallSchema(db *sql.DB) error {
 		{name: "direct message attachments", fn: ensureDirectMessageAttachmentColumns},
 		{name: "call sessions", fn: ensureCallSessionTables},
 		{name: "user presence", fn: ensureUserPresenceTable},
+		{name: "innovation ideas", fn: ensureInnovationIdeasTable},
 	}
 
 	for _, step := range steps {
@@ -113,6 +114,39 @@ func ensureUserPresenceTable(db *sql.DB) error {
 			last_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
 			INDEX idx_user_presence_last_seen (last_seen_at)
+		)
+	`)
+	return err
+}
+
+func ensureInnovationIdeasTable(db *sql.DB) error {
+	if tableExists(db, "innovation_ideas") {
+		return nil
+	}
+
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS innovation_ideas (
+			id INT AUTO_INCREMENT PRIMARY KEY,
+			user_id INT NOT NULL,
+			full_name VARCHAR(200) NOT NULL,
+			department VARCHAR(200) NOT NULL,
+			email VARCHAR(255) NOT NULL,
+			title VARCHAR(300) NOT NULL,
+			description TEXT NOT NULL,
+			problem TEXT NOT NULL,
+			solution TEXT NULL,
+			photo_url TEXT NULL,
+			declaration_accepted TINYINT(1) NOT NULL DEFAULT 0,
+			signature VARCHAR(255) NULL,
+			reviewer VARCHAR(200) NULL,
+			status VARCHAR(40) NOT NULL DEFAULT 'submitted',
+			comments TEXT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			INDEX idx_innovation_ideas_user_id (user_id),
+			INDEX idx_innovation_ideas_status (status),
+			INDEX idx_innovation_ideas_created_at (created_at)
 		)
 	`)
 	return err

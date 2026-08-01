@@ -503,11 +503,17 @@ func main() {
 			admin.PATCH("/helpdesk/:ticket_id", handlers.UpdateHelpdeskTicketByAdmin)
 			admin.DELETE("/helpdesk/:ticket_id", handlers.DeleteHelpdeskTicketByAdmin)
 			admin.GET("/login-audit", handlers.ListLoginAuditLogsByAdmin)
+			admin.GET("/innovation", handlers.ListInnovationIdeasByAdmin)
+			admin.PATCH("/innovation/:idea_id", handlers.UpdateInnovationIdeaByAdmin)
 		}
 
 		// Chatbot routes
 		protected.POST("/chatbot", handlers.ChatbotHandler())
 		protected.POST("/chatbot/report", handlers.SIAReportHandler())
+
+		// Innovation / SoluGility
+		protected.GET("/innovation", handlers.ListMyInnovationIdeas)
+		protected.POST("/innovation", handlers.SubmitInnovationIdea)
 
 		// BPO Analysis routes
 		bpo := protected.Group("/bpo")

@@ -391,7 +391,7 @@ func UpdateUserByAdmin(c *gin.Context) {
 		email = *req.Email
 	}
 	if req.PhoneNumber != nil {
-		phoneNumber = *req.PhoneNumber
+		phoneNumber = models.NormalizePhoneE164(*req.PhoneNumber, "27")
 	}
 	if req.Role != nil {
 		role = strings.TrimSpace(strings.ToLower(*req.Role))
@@ -468,7 +468,7 @@ func CreateUserByAdmin(c *gin.Context) {
 
 	username := strings.TrimSpace(req.Username)
 	email := strings.TrimSpace(strings.ToLower(req.Email))
-	phoneNumber := strings.TrimSpace(req.PhoneNumber)
+	phoneNumber := models.NormalizePhoneE164(req.PhoneNumber, "27")
 	role := strings.TrimSpace(strings.ToLower(req.Role))
 	if role == "" {
 		role = models.RoleUser

@@ -64,7 +64,7 @@ func registerWithProvider(c *gin.Context, provider, successMessage string) {
 
 	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 	req.Username = strings.TrimSpace(req.Username)
-	req.PhoneNumber = strings.TrimSpace(req.PhoneNumber)
+	req.PhoneNumber = models.NormalizePhoneE164(req.PhoneNumber, "27")
 
 	if _, err := models.GetUserByEmail(database.DB, req.Email); err == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Email already exists"})
@@ -344,8 +344,10 @@ func deliverResetCode(user *models.User, message string) ([]string, []string) {
 	channels := []string{}
 	errors := []string{}
 
-	if strings.TrimSpace(user.PhoneNumber) != "" {
-		if err := models.PublishSMS(user.PhoneNumber, message); err != nil {
+	phone := models.NormalizePhoneE164(user.PhoneNumber, "27")
+	if phone != "" {
+		if err := models.PublishSMS(phone, message); err != nil {
+			log.Printf("Password reset SMS failed for user %d (%s): %v", user.ID, phone, err)
 			errors = append(errors, "sms: "+err.Error())
 		} else {
 			channels = append(channels, "sms")
@@ -360,7 +362,7 @@ func deliverResetCode(user *models.User, message string) ([]string, []string) {
 		}
 	}
 
-	if strings.TrimSpace(user.PhoneNumber) == "" {
+	if phone == "" {
 		errors = append(errors, "sms: user phone number is not registered")
 	}
 	if !services.IsMailConfigured() {

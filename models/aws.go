@@ -78,18 +78,20 @@ func PublishSMS(phoneNumber, message string) error {
 	if SNSClient == nil {
 		return fmt.Errorf("SNS client not initialized")
 	}
-	if strings.TrimSpace(phoneNumber) == "" {
+	normalized := NormalizePhoneE164(phoneNumber, "27")
+	if normalized == "" {
 		return fmt.Errorf("phone number is required")
 	}
 
 	_, err := SNSClient.Publish(context.Background(), &sns.PublishInput{
-		PhoneNumber: aws.String(phoneNumber),
+		PhoneNumber: aws.String(normalized),
 		Message:     aws.String(message),
 	})
 	if err != nil {
-		return fmt.Errorf("failed to publish SMS with SNS: %w", err)
+		return fmt.Errorf("failed to publish SMS to %s with SNS: %w", normalized, err)
 	}
 
+	log.Printf("SNS SMS published to %s", normalized)
 	return nil
 }
 

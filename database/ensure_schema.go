@@ -20,6 +20,7 @@ func EnsureChatAndCallSchema(db *sql.DB) error {
 		{name: "call sessions", fn: ensureCallSessionTables},
 		{name: "user presence", fn: ensureUserPresenceTable},
 		{name: "innovation ideas", fn: ensureInnovationIdeasTable},
+		{name: "cv builder logs", fn: ensureCVBuilderLogsTable},
 	}
 
 	for _, step := range steps {
@@ -147,6 +148,37 @@ func ensureInnovationIdeasTable(db *sql.DB) error {
 			INDEX idx_innovation_ideas_user_id (user_id),
 			INDEX idx_innovation_ideas_status (status),
 			INDEX idx_innovation_ideas_created_at (created_at)
+		)
+	`)
+	return err
+}
+
+func ensureCVBuilderLogsTable(db *sql.DB) error {
+	if tableExists(db, "cv_builder_logs") {
+		return nil
+	}
+
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS cv_builder_logs (
+			id BIGINT AUTO_INCREMENT PRIMARY KEY,
+			user_id INT NOT NULL,
+			email VARCHAR(255) NULL,
+			username VARCHAR(255) NULL,
+			action VARCHAR(40) NOT NULL,
+			from_step INT NULL,
+			to_step INT NULL,
+			from_label VARCHAR(100) NULL,
+			to_label VARCHAR(100) NULL,
+			format VARCHAR(20) NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'clicked',
+			detail VARCHAR(500) NULL,
+			ip_address VARCHAR(64) NULL,
+			user_agent VARCHAR(500) NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			INDEX idx_cv_builder_logs_user_id (user_id),
+			INDEX idx_cv_builder_logs_action (action),
+			INDEX idx_cv_builder_logs_created_at (created_at)
 		)
 	`)
 	return err

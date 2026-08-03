@@ -460,18 +460,42 @@ func DownloadCVByAdmin(c *gin.Context) {
 // ---------- Shared helper ----------
 
 func downloadCVForUser(c *gin.Context, userID int) {
+	actorID, _ := currentUserID(c)
+	format := strings.ToLower(strings.TrimSpace(c.DefaultQuery("format", "pdf")))
+	wantWord := format == "word" || format == "docx"
+	action := models.CVBuilderActionDownloadPDF
+	formatLabel := "pdf"
+	if wantWord {
+		action = models.CVBuilderActionDownloadWord
+		formatLabel = "word"
+	}
+
+	logDownload := func(status, detail string) {
+		if actorID <= 0 {
+			return
+		}
+		entry := models.CVBuilderLog{
+			UserID: actorID,
+			Action: action,
+			Format: formatLabel,
+			Status: status,
+			Detail: detail,
+		}
+		enrichCVBuilderLogUser(&entry)
+		recordCVBuilderLog(c, entry)
+	}
+
 	profile, err := models.GetCVProfileByUserID(database.DB, userID)
 	if err != nil {
+		logDownload(models.CVBuilderStatusFailed, "Failed to load CV")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load CV"})
 		return
 	}
 	if profile == nil {
+		logDownload(models.CVBuilderStatusFailed, "CV not found")
 		c.JSON(http.StatusNotFound, gin.H{"error": "CV not found. Please fill in your CV details first."})
 		return
 	}
-
-	format := strings.ToLower(strings.TrimSpace(c.DefaultQuery("format", "pdf")))
-	wantWord := format == "word" || format == "docx"
 
 	var (
 		fileBytes   []byte
@@ -491,14 +515,22 @@ func downloadCVForUser(c *gin.Context, userID int) {
 		ext = "pdf"
 		label = "PDF"
 	} else {
+		logDownload(models.CVBuilderStatusFailed, "Unsupported format")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Unsupported format. Use pdf or word (docx)."})
 		return
 	}
 	if err != nil {
 		log.Printf("CV %s generation failed for user %d: %v", label, userID, err)
+		logDownload(models.CVBuilderStatusFailed, "Failed to generate "+label)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate " + label})
 		return
 	}
+
+	detail := formatLabel + " downloaded"
+	if actorID > 0 && actorID != userID {
+		detail = fmt.Sprintf("%s downloaded for user %d", formatLabel, userID)
+	}
+	logDownload(models.CVBuilderStatusSuccess, detail)
 
 	firstName := strings.TrimSpace(profile.FirstName)
 	lastName := strings.TrimSpace(profile.LastName)

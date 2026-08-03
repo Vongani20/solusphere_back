@@ -534,6 +534,7 @@ func main() {
 			cv.POST("/photo", handlers.UploadCVPhoto)
 			cv.POST("/import", handlers.ImportCVFromDocument)
 			cv.GET("/download", handlers.DownloadCVPDF)
+			cv.POST("/logs", handlers.CreateCVBuilderLog)
 			cv.GET("/search", handlers.SearchCVs)
 		}
 
@@ -541,6 +542,7 @@ func main() {
 		admin.GET("/cvs", handlers.ListCVsByAdmin)
 		admin.GET("/cvs/:user_id", handlers.GetCVByAdmin)
 		admin.GET("/cvs/:user_id/download", handlers.DownloadCVByAdmin)
+		admin.GET("/cv-builder-logs", handlers.ListCVBuilderLogsByAdmin)
 
 		// File upload routes
 		protected.POST("/upload", handlers.UploadHandler)
@@ -631,6 +633,7 @@ func main() {
 	log.Println("  PATCH /api/admin/helpdesk/:ticket_id (admin)")
 	log.Println("  DELETE /api/admin/helpdesk/:ticket_id (admin)")
 	log.Println("  GET  /api/admin/login-audit (admin)")
+	log.Println("  GET  /api/admin/cv-builder-logs (admin)")
 	log.Println("  POST /api/chatbot (requires auth)")
 	log.Println("  POST /api/chatbot/report (requires auth)")
 	log.Println("  POST /api/bpo/analyze-pdf (requires auth)")
@@ -641,6 +644,7 @@ func main() {
 	log.Println("  POST /api/cv/photo (requires auth)")
 	log.Println("  POST /api/cv/import (requires auth)")
 	log.Println("  GET  /api/cv/download (requires auth)")
+	log.Println("  POST /api/cv/logs (requires auth)")
 	log.Println("  GET  /api/cv/search?skill=&qualification= (requires auth)")
 	log.Println("  GET  /api/admin/cvs (admin)")
 	log.Println("  GET  /api/admin/cvs/:user_id (admin)")

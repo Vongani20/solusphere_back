@@ -115,10 +115,9 @@ func (s *CVPDFService) GenerateWord(profile *models.CVProfile) ([]byte, error) {
 // a template placeholder.
 func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
 	doc = pinCVSidebarTable(doc)
-	doc = pinCVProfilePhoto(doc)
 	// Master template keeps the floating sidebar table first, then name/photo/
 	// PROFILE. Remove only the empty VALUE PROPOSITION spacer gap so PROFILE
-	// stays on page 1 beside the sidebar (do not relocate the table).
+	// can sit beside the sidebar once the left column is also page-floated.
 	doc = compactCVPage1LeftColumn(doc)
 
 	// Item paragraph templates, extracted from the pristine document.
@@ -253,12 +252,19 @@ func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
 	doc = doc[:natStart] + natPara + doc[natEnd:]
 
 	// ---- Personal details: gender (value split across two runs: "M"+"ale") ----
-	return replaceWithinParagraph(doc, "Gender:", func(para string) string {
+	doc, err = replaceWithinParagraph(doc, "Gender:", func(para string) string {
 		gender := xmlEscapeCV(orCVPlaceholder(profile.Gender, "[Insert gender]"))
 		para = strings.Replace(para, ">M</w:t>", ">"+gender+"</w:t>", 1)
 		para = strings.Replace(para, ">ale</w:t>", "></w:t>", 1)
 		return para
 	})
+	if err != nil {
+		return "", err
+	}
+
+	// A tall filled sidebar is a multipage float; Word then pushes normal-flow
+	// name/PROFILE below it (page 2+). Float the left column onto page 1 too.
+	return floatCVPage1LeftColumn(doc), nil
 }
 
 // pinCVSidebarTable anchors the personal-details sidebar table to the page
@@ -273,15 +279,91 @@ func pinCVSidebarTable(doc string) string {
 	return strings.Replace(doc, floating, pinned, 1)
 }
 
-// pinCVProfilePhoto keeps the candidate photo on page 1, top-left, under the
-// name/header. The master template anchors it to a paragraph, so after PROFILE
-// rewrites it can drift down the page or onto page 2.
-func pinCVProfilePhoto(doc string) string {
-	const floating = `<wp:positionH relativeFrom="column"><wp:posOffset>386715</wp:posOffset></wp:positionH><wp:positionV relativeFrom="paragraph"><wp:posOffset>130175</wp:posOffset></wp:positionV>`
-	// ~12mm from left page edge, ~39mm from top so the photo sits below the
-	// candidate name and CURRICULUM VITAE title instead of overlapping them.
-	const pinned = `<wp:positionH relativeFrom="page"><wp:posOffset>432000</wp:posOffset></wp:positionH><wp:positionV relativeFrom="page"><wp:posOffset>1404000</wp:posOffset></wp:positionV>`
-	return strings.Replace(doc, floating, pinned, 1)
+// floatCVPage1LeftColumn lifts name/photo/PROFILE out of normal flow into a
+// page-anchored floating table on the left of page 1. The master template's
+// sidebar is already a right-hand float; once filled it often spans pages and
+// Word pushes any following in-flow left-column text onto page 2. Making both
+// columns page-floats keeps PERSONAL DETAILS and PROFILE on page 1 together.
+func floatCVPage1LeftColumn(doc string) string {
+	nameStart, _, err := paragraphBounds(doc, "CURRICULUM VITAE", 0)
+	if err != nil {
+		return doc
+	}
+	_, profEnd, err := paragraphBounds(doc, ">PROFILE<", 0)
+	if err != nil {
+		return doc
+	}
+	_, bodyEnd, err := nextParagraphDepth(doc, profEnd)
+	if err != nil || bodyEnd <= nameStart {
+		return doc
+	}
+	if brStart, _, brErr := paragraphBounds(doc, `w:type="page"`, 0); brErr == nil && bodyEnd > brStart {
+		bodyEnd = brStart
+	}
+	if bodyEnd <= nameStart {
+		return doc
+	}
+
+	leftInner := doc[nameStart:bodyEnd]
+	if !strings.Contains(leftInner, ">PROFILE<") || !strings.Contains(leftInner, "<w:drawing>") {
+		return doc
+	}
+	leftTbl := cvFloatingLeftColumnTable(leftInner)
+
+	without := doc[:nameStart] + doc[bodyEnd:]
+	tblClose := indexTopLevelTableEnd(without)
+	if tblClose < 0 {
+		return doc
+	}
+	return without[:tblClose] + leftTbl + without[tblClose:]
+}
+
+// indexTopLevelTableEnd returns the index after the first top-level </w:tbl>.
+func indexTopLevelTableEnd(doc string) int {
+	start := strings.Index(doc, "<w:tbl>")
+	if start < 0 {
+		return -1
+	}
+	depth := 0
+	for i := start; i < len(doc); {
+		if strings.HasPrefix(doc[i:], "<w:tbl>") {
+			depth++
+			i += len("<w:tbl>")
+			continue
+		}
+		if strings.HasPrefix(doc[i:], "</w:tbl>") {
+			depth--
+			i += len("</w:tbl>")
+			if depth == 0 {
+				return i
+			}
+			continue
+		}
+		i++
+	}
+	return -1
+}
+
+// cvFloatingLeftColumnTable wraps page-1 left-column paragraphs in a borderless
+// floating table pinned to the page (top-left), beside the sidebar.
+func cvFloatingLeftColumnTable(inner string) string {
+	// ~left margin X, just under the header; width leaves room for the sidebar
+	// at tblpX=6751.
+	return `<w:tbl><w:tblPr>` +
+		`<w:tblpPr w:leftFromText="0" w:rightFromText="120" w:vertAnchor="page" w:horzAnchor="page" w:tblpX="851" w:tblpY="1100"/>` +
+		`<w:tblOverlap w:val="overlap"/>` +
+		`<w:tblW w:w="5600" w:type="dxa"/>` +
+		`<w:tblBorders>` +
+		`<w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/>` +
+		`</w:tblBorders>` +
+		`</w:tblPr>` +
+		`<w:tblGrid><w:gridCol w:w="5600"/></w:tblGrid>` +
+		`<w:tr><w:tc><w:tcPr><w:tcW w:w="5600" w:type="dxa"/>` +
+		`<w:tcBorders>` +
+		`<w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/>` +
+		`</w:tcBorders></w:tcPr>` +
+		inner +
+		`</w:tc></w:tr></w:tbl>`
 }
 
 // compactCVPage1LeftColumn removes the empty-paragraph gap the master template

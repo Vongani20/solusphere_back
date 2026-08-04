@@ -52,34 +52,49 @@ func TestGenerateCVWordKeepsProfileOnPage1(t *testing.T) {
 		t.Fatalf("PROFILE body must be on page 1 before EXPERIENCE page break (body=%d break=%d)", bodyIdx, breakIdx)
 	}
 
-	// Master template order: floating sidebar table first, then name/PROFILE.
+	// Sidebar + left-column floats must both sit before the EXPERIENCE page break.
 	tblIdx := strings.Index(xmlText, "<w:tbl>")
 	if tblIdx < 0 || tblIdx > breakIdx {
 		t.Fatalf("PERSONAL DETAILS sidebar must be before EXPERIENCE page break (table=%d break=%d)", tblIdx, breakIdx)
 	}
 	if !(tblIdx < nameIdx && nameIdx < profIdx && profIdx < breakIdx) {
-		t.Fatalf("expected master order sidebar(%d) < name(%d) < PROFILE(%d) < pageBreak(%d)", tblIdx, nameIdx, profIdx, breakIdx)
+		t.Fatalf("expected sidebar(%d) < name(%d) < PROFILE(%d) < pageBreak(%d)", tblIdx, nameIdx, profIdx, breakIdx)
 	}
 	if !strings.Contains(xmlText[:breakIdx], "PERSONAL") {
 		t.Fatal("expected PERSONAL DETAILS content before EXPERIENCE page break")
 	}
+	if !strings.Contains(xmlText, `w:tblpX="851" w:tblpY="1100"`) {
+		t.Fatal("expected page-1 left column floating table")
+	}
+	if !strings.Contains(xmlText, `w:vertAnchor="page" w:horzAnchor="page" w:tblpX="6751" w:tblpY="1021"`) {
+		t.Fatal("expected page-1 sidebar floating table")
+	}
 }
 
-func TestPinCVProfilePhotoUsesPageAnchor(t *testing.T) {
+func TestFloatCVPage1LeftColumn(t *testing.T) {
 	raw, err := cvMasterTemplateDocxBytes()
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc := string(raw)
-	out := pinCVProfilePhoto(doc)
+	doc := compactCVPage1LeftColumn(pinCVSidebarTable(string(raw)))
+	// Simulate filled name so CURRICULUM VITAE paragraph is still the anchor.
+	out := floatCVPage1LeftColumn(doc)
 	if out == doc {
-		t.Fatal("expected photo anchor to be rewritten")
+		t.Fatal("expected left column to be wrapped in a floating table")
 	}
-	if !strings.Contains(out, `relativeFrom="page"><wp:posOffset>432000</wp:posOffset>`) {
-		t.Fatal("expected page-relative horizontal pin")
+	if !strings.Contains(out, `w:tblpX="851" w:tblpY="1100"`) {
+		t.Fatal("missing left-column page anchor")
 	}
-	if !strings.Contains(out, `relativeFrom="page"><wp:posOffset>1404000</wp:posOffset>`) {
-		t.Fatal("expected page-relative vertical pin below the name/title")
+	leftIdx := strings.Index(out, `w:tblpX="851"`)
+	nameIdx := strings.Index(out, "CURRICULUM VITAE")
+	profIdx := strings.Index(out, ">PROFILE<")
+	brIdx := strings.Index(out, `w:type="page"`)
+	if !(leftIdx < nameIdx && nameIdx < profIdx && profIdx < brIdx) {
+		t.Fatalf("expected left float to contain name/PROFILE before page break (left=%d name=%d profile=%d break=%d)", leftIdx, nameIdx, profIdx, brIdx)
+	}
+	var node struct{}
+	if err := xml.Unmarshal([]byte(out), &node); err != nil {
+		t.Fatalf("floated left column must keep well-formed XML: %v", err)
 	}
 }
 

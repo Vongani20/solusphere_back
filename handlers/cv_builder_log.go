@@ -1,10 +1,12 @@
 package handlers
 
 import (
+	"fmt"
 	"log"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -102,6 +104,18 @@ func CreateCVBuilderLog(c *gin.Context) {
 	c.JSON(http.StatusCreated, gin.H{"message": "CV builder event logged"})
 }
 
+func parseCVBuilderLogFilter(c *gin.Context, page, limit int, export bool) models.CVBuilderLogFilter {
+	filterUserID, _ := strconv.Atoi(c.Query("user_id"))
+	return models.CVBuilderLogFilter{
+		Email:  c.Query("email"),
+		Action: c.Query("action"),
+		UserID: filterUserID,
+		Page:   page,
+		Limit:  limit,
+		Export: export,
+	}
+}
+
 // ListCVBuilderLogsByAdmin returns paginated CV Builder activity logs.
 func ListCVBuilderLogsByAdmin(c *gin.Context) {
 	userID, ok := currentUserID(c)
@@ -115,15 +129,8 @@ func ListCVBuilderLogsByAdmin(c *gin.Context) {
 
 	page, _ := strconv.Atoi(c.DefaultQuery("page", "1"))
 	limit, _ := strconv.Atoi(c.DefaultQuery("limit", "50"))
-	filterUserID, _ := strconv.Atoi(c.Query("user_id"))
 
-	logs, total, err := models.ListCVBuilderLogs(database.DB, models.CVBuilderLogFilter{
-		Email:  c.Query("email"),
-		Action: c.Query("action"),
-		UserID: filterUserID,
-		Page:   page,
-		Limit:  limit,
-	})
+	logs, total, err := models.ListCVBuilderLogs(database.DB, parseCVBuilderLogFilter(c, page, limit, false))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load CV builder logs"})
 		return
@@ -146,4 +153,104 @@ func ListCVBuilderLogsByAdmin(c *gin.Context) {
 			"totalPages": totalPages,
 		},
 	})
+}
+
+// DownloadCVBuilderLogsTXT exports matching CV Builder logs as a plain-text file.
+func DownloadCVBuilderLogsTXT(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	if !requireAdmin(c, userID) {
+		return
+	}
+
+	logs, total, err := models.ListCVBuilderLogs(database.DB, parseCVBuilderLogFilter(c, 1, 10000, true))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to export CV builder logs"})
+		return
+	}
+
+	var b strings.Builder
+	b.WriteString("Solusphere CV Builder Logs\n")
+	b.WriteString(fmt.Sprintf("Exported at: %s\n", time.Now().UTC().Format(time.RFC3339)))
+	b.WriteString(fmt.Sprintf("Total records: %d (export limit 10000)\n", total))
+	if email := strings.TrimSpace(c.Query("email")); email != "" {
+		b.WriteString(fmt.Sprintf("Filter email: %s\n", email))
+	}
+	if action := strings.TrimSpace(c.Query("action")); action != "" {
+		b.WriteString(fmt.Sprintf("Filter action: %s\n", action))
+	}
+	b.WriteString(strings.Repeat("-", 100) + "\n")
+	b.WriteString(fmt.Sprintf("%-20s  %-8s  %-28s  %-14s  %-10s  %-28s  %-16s  %s\n",
+		"WHEN_UTC", "USER_ID", "EMAIL", "ACTION", "STATUS", "STEP", "IP", "DETAIL"))
+	b.WriteString(strings.Repeat("-", 100) + "\n")
+
+	for _, entry := range logs {
+		step := "—"
+		if entry.Action == models.CVBuilderActionNextStep {
+			from := entry.FromLabel
+			to := entry.ToLabel
+			if from == "" && entry.FromStep != nil {
+				from = fmt.Sprintf("step %d", *entry.FromStep)
+			}
+			if to == "" && entry.ToStep != nil {
+				to = fmt.Sprintf("step %d", *entry.ToStep)
+			}
+			if from == "" {
+				from = "—"
+			}
+			if to == "" {
+				to = "—"
+			}
+			step = from + " -> " + to
+		} else if entry.FromLabel != "" {
+			step = entry.FromLabel
+		} else if entry.Format != "" {
+			step = entry.Format
+		}
+
+		email := entry.Email
+		if email == "" {
+			email = "—"
+		}
+		ip := entry.IPAddress
+		if ip == "" {
+			ip = "—"
+		}
+		detail := entry.Detail
+		if detail == "" {
+			detail = "—"
+		}
+		detail = strings.ReplaceAll(detail, "\n", " ")
+		detail = strings.ReplaceAll(detail, "\r", " ")
+
+		b.WriteString(fmt.Sprintf("%-20s  %-8d  %-28s  %-14s  %-10s  %-28s  %-16s  %s\n",
+			entry.CreatedAt.UTC().Format("2006-01-02 15:04:05"),
+			entry.UserID,
+			truncateTXT(email, 28),
+			truncateTXT(entry.Action, 14),
+			truncateTXT(entry.Status, 10),
+			truncateTXT(step, 28),
+			truncateTXT(ip, 16),
+			detail,
+		))
+	}
+
+	filename := fmt.Sprintf("cv_builder_logs_%s.txt", time.Now().UTC().Format("20060102_150405"))
+	c.Header("Content-Type", "text/plain; charset=utf-8")
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	c.String(http.StatusOK, b.String())
+}
+
+func truncateTXT(value string, max int) string {
+	value = strings.TrimSpace(value)
+	if max <= 0 || len(value) <= max {
+		return value
+	}
+	if max <= 3 {
+		return value[:max]
+	}
+	return value[:max-3] + "..."
 }

@@ -543,6 +543,7 @@ func main() {
 		admin.GET("/cvs/:user_id", handlers.GetCVByAdmin)
 		admin.GET("/cvs/:user_id/download", handlers.DownloadCVByAdmin)
 		admin.GET("/cv-builder-logs", handlers.ListCVBuilderLogsByAdmin)
+		admin.GET("/cv-builder-logs/download", handlers.DownloadCVBuilderLogsTXT)
 
 		// File upload routes
 		protected.POST("/upload", handlers.UploadHandler)
@@ -634,6 +635,7 @@ func main() {
 	log.Println("  DELETE /api/admin/helpdesk/:ticket_id (admin)")
 	log.Println("  GET  /api/admin/login-audit (admin)")
 	log.Println("  GET  /api/admin/cv-builder-logs (admin)")
+	log.Println("  GET  /api/admin/cv-builder-logs/download (admin)")
 	log.Println("  POST /api/chatbot (requires auth)")
 	log.Println("  POST /api/chatbot/report (requires auth)")
 	log.Println("  POST /api/bpo/analyze-pdf (requires auth)")

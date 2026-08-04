@@ -40,6 +40,7 @@ type CVBuilderLogFilter struct {
 	UserID int
 	Page   int
 	Limit  int
+	Export bool
 }
 
 func CreateCVBuilderLog(db *sql.DB, entry *CVBuilderLog) error {
@@ -101,8 +102,15 @@ func ListCVBuilderLogs(db *sql.DB, filter CVBuilderLogFilter) ([]CVBuilderLog, i
 	if filter.Page < 1 {
 		filter.Page = 1
 	}
-	if filter.Limit < 1 || filter.Limit > 200 {
+	maxLimit := 200
+	if filter.Export {
+		maxLimit = 10000
+	}
+	if filter.Limit < 1 {
 		filter.Limit = 50
+	}
+	if filter.Limit > maxLimit {
+		filter.Limit = maxLimit
 	}
 
 	where := []string{"1=1"}

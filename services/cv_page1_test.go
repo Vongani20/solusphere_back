@@ -73,6 +73,11 @@ func TestGenerateCVWordKeepsProfileOnPage1(t *testing.T) {
 	if err != nil || !strings.Contains(xmlText[nameParaEnd-900:nameParaEnd], `w:right="0"`) {
 		t.Fatal("candidate-name paragraph must not retain the legacy sidebar right indent")
 	}
+	leftStart := strings.Index(xmlText, `<w:tcW w:w="5600" w:type="dxa"/>`)
+	leftEnd := strings.Index(xmlText[leftStart:], "</w:tc>")
+	if leftStart < 0 || leftEnd < 0 || strings.Contains(xmlText[leftStart:leftStart+leftEnd], "<w:drawing>") {
+		t.Fatal("page-one left cell must not contain the incompatible floating photo drawing")
+	}
 }
 
 func TestLayoutCVPage1SideBySide(t *testing.T) {
@@ -97,6 +102,11 @@ func TestLayoutCVPage1SideBySide(t *testing.T) {
 	}
 	if !(nameIdx < brIdx && profIdx < brIdx && pdIdx < brIdx) {
 		t.Fatalf("name/PROFILE/PERSONAL DETAILS must all be before page break")
+	}
+	leftStart := strings.Index(out, `<w:tcW w:w="5600" w:type="dxa"/>`)
+	leftEnd := strings.Index(out[leftStart:], "</w:tc>")
+	if leftStart < 0 || leftEnd < 0 || strings.Contains(out[leftStart:leftStart+leftEnd], "<w:drawing>") {
+		t.Fatal("side-by-side left cell must remove the floating photo drawing")
 	}
 	var node struct{}
 	if err := xml.Unmarshal([]byte(out), &node); err != nil {

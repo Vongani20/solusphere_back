@@ -306,6 +306,11 @@ func layoutCVPage1SideBySide(doc string) string {
 	// leaves only a few characters of usable width, causing words to stack
 	// vertically. Remove that legacy reservation for the normal-flow cell.
 	leftInner = normalizeCVPage1LeftColumnWidth(leftInner)
+	// The template photo is a floating drawing with text wrapping. Once moved
+	// into a table cell it overlaps the PROFILE body and collapses it to a
+	// character-wide strip. Omit that incompatible floating drawing from the
+	// rebuilt page-one layout rather than allowing it to corrupt readable text.
+	leftInner = removeCVPage1DrawingParagraphs(leftInner)
 
 	bodyOpen := strings.Index(doc, "<w:body>")
 	if bodyOpen < 0 {
@@ -324,6 +329,24 @@ func normalizeCVPage1LeftColumnWidth(left string) string {
 	// extra attributes. The right indent is the cause of the collapsed text.
 	left = strings.ReplaceAll(left, ` w:right="4421"`, ` w:right="0"`)
 	return left
+}
+
+func removeCVPage1DrawingParagraphs(content string) string {
+	var out strings.Builder
+	for pos := 0; pos < len(content); {
+		start, end, err := nextParagraphDepth(content, pos)
+		if err != nil {
+			out.WriteString(content[pos:])
+			break
+		}
+		out.WriteString(content[pos:start])
+		para := content[start:end]
+		if !strings.Contains(para, "<w:drawing>") {
+			out.WriteString(para)
+		}
+		pos = end
+	}
+	return out.String()
 }
 
 // stripCVFloatingTableProps removes absolute positioning so the sidebar can sit

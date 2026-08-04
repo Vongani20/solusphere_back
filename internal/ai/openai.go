@@ -30,11 +30,19 @@ type ImageInput struct {
 	Detail   string
 }
 
+// FileInput is a document (PDF, etc.) passed to the Responses API as input_file.
+// FileData should be a data URL (data:application/pdf;base64,...) or similar.
+type FileInput struct {
+	Filename string
+	FileData string
+}
+
 type GenerateTextRequest struct {
 	SystemPrompt    string
 	UserPrompt      string
 	Messages        []Message
 	Images          []ImageInput
+	Files           []FileInput
 	MaxOutputTokens int
 	Temperature     float64
 	WebSearch       bool
@@ -240,15 +248,17 @@ func buildInput(req GenerateTextRequest) []map[string]interface{} {
 		role := normalizeRole(msg.Role)
 		isLastUser := i == len(messages)-1 && role == "user"
 		images := []ImageInput(nil)
+		files := []FileInput(nil)
 		if isLastUser {
 			images = req.Images
+			files = req.Files
 		}
 
-		if content == "" && len(images) == 0 {
+		if content == "" && len(images) == 0 && len(files) == 0 {
 			continue
 		}
 
-		if len(images) == 0 {
+		if len(images) == 0 && len(files) == 0 {
 			input = append(input, map[string]interface{}{
 				"role":    role,
 				"content": content,
@@ -256,11 +266,26 @@ func buildInput(req GenerateTextRequest) []map[string]interface{} {
 			continue
 		}
 
-		parts := make([]map[string]interface{}, 0, 1+len(images))
+		parts := make([]map[string]interface{}, 0, 1+len(images)+len(files))
 		if content != "" {
 			parts = append(parts, map[string]interface{}{
 				"type": "input_text",
 				"text": content,
+			})
+		}
+		for _, file := range files {
+			dataURL := strings.TrimSpace(file.FileData)
+			if dataURL == "" {
+				continue
+			}
+			filename := strings.TrimSpace(file.Filename)
+			if filename == "" {
+				filename = "document.pdf"
+			}
+			parts = append(parts, map[string]interface{}{
+				"type":      "input_file",
+				"filename":  filename,
+				"file_data": dataURL,
 			})
 		}
 		for _, img := range images {
@@ -290,9 +315,9 @@ func buildInput(req GenerateTextRequest) []map[string]interface{} {
 	if len(input) == 0 {
 		prompt := strings.TrimSpace(req.UserPrompt)
 		if prompt == "" {
-			prompt = "Describe the attached image(s)."
+			prompt = "Describe the attached file(s)."
 		}
-		if len(req.Images) == 0 {
+		if len(req.Images) == 0 && len(req.Files) == 0 {
 			input = append(input, map[string]interface{}{
 				"role":    "user",
 				"content": prompt,
@@ -300,6 +325,21 @@ func buildInput(req GenerateTextRequest) []map[string]interface{} {
 		} else {
 			parts := []map[string]interface{}{
 				{"type": "input_text", "text": prompt},
+			}
+			for _, file := range req.Files {
+				dataURL := strings.TrimSpace(file.FileData)
+				if dataURL == "" {
+					continue
+				}
+				filename := strings.TrimSpace(file.Filename)
+				if filename == "" {
+					filename = "document.pdf"
+				}
+				parts = append(parts, map[string]interface{}{
+					"type":      "input_file",
+					"filename":  filename,
+					"file_data": dataURL,
+				})
 			}
 			for _, img := range req.Images {
 				url := strings.TrimSpace(img.ImageURL)

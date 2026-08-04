@@ -101,7 +101,10 @@ func TestExtractTextFromDocxBytes(t *testing.T) {
 	if _, err := ExtractTextFromCVUpload("cv.docx", buf.Bytes()); err != nil {
 		t.Fatalf("ExtractTextFromCVUpload docx: %v", err)
 	}
-	if _, err := ExtractTextFromCVUpload("cv.doc", buf.Bytes()); err == nil {
-		t.Fatal("expected legacy .doc rejection")
+	if got := detectCVDocumentKind("cv.doc", append([]byte{0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1}, []byte("Curriculum Vitae John Doe Experience Finance")...)); got != "doc" {
+		t.Fatalf("detectCVDocumentKind(.doc)=%q, want doc", got)
+	}
+	if got := detectCVDocumentKind("scan.jpg", []byte{0xff, 0xd8, 0xff, 0xe0}); got != "jpeg" {
+		t.Fatalf("detectCVDocumentKind(jpeg)=%q, want jpeg", got)
 	}
 }

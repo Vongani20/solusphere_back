@@ -151,8 +151,8 @@ func validateCVProfile(p *models.CVProfile) map[string]string {
 	return errs
 }
 
-// ImportCVFromDocument parses an uploaded CV PDF or Word (.docx) and returns
-// structured fields for the wizard.
+// ImportCVFromDocument parses an uploaded CV (PDF, Word, images, and similar) and returns
+// structured fields for the wizard. Scanned PDFs/images use OCR when needed.
 func ImportCVFromDocument(c *gin.Context) {
 	userID, ok := currentUserID(c)
 	if !ok {
@@ -174,25 +174,23 @@ func ImportCVFromDocument(c *gin.Context) {
 		return
 	}
 
-	ext := strings.ToLower(filepath.Ext(filename))
-	if ext != ".pdf" && ext != ".docx" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Only PDF and Word (.docx) files are supported"})
-		return
-	}
-
-	const maxSize = 10 << 20 // 10 MB
+	const maxSize = 15 << 20 // 15 MB
 	if int64(len(data)) > maxSize {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "File must be smaller than 10 MB"})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "File must be smaller than 15 MB"})
 		return
 	}
 
 	text, err := services.ExtractTextFromCVUpload(filename, data)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Could not read text from document. Try a text-based PDF or .docx export.", "details": err.Error()})
+		log.Printf("CV import text extraction failed for %q: %v", filename, err)
+		c.JSON(http.StatusBadRequest, gin.H{
+			"error":   "Could not read text from document. Try another file or a clearer scan.",
+			"details": err.Error(),
+		})
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 3*time.Minute)
 	defer cancel()
 
 	profile, warnings, err := services.ParseCVFromDocumentText(ctx, text)
@@ -274,8 +272,8 @@ func readCVImportPayload(c *gin.Context) (string, []byte, error) {
 	if err != nil {
 		return "", nil, errors.New("CV document is required")
 	}
-	if file.Size > 10<<20 {
-		return "", nil, errors.New("File must be smaller than 10 MB")
+	if file.Size > 15<<20 {
+		return "", nil, errors.New("File must be smaller than 15 MB")
 	}
 	src, err := file.Open()
 	if err != nil {

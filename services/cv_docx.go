@@ -115,7 +115,6 @@ func (s *CVPDFService) GenerateWord(profile *models.CVProfile) ([]byte, error) {
 func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
 	doc = pinCVSidebarTable(doc)
 	doc = pinCVProfilePhoto(doc)
-	doc = compactCVPage1LeftColumn(doc)
 
 	// Item paragraph templates, extracted from the pristine document.
 	bulletTemplate, err := extractParagraph(doc, ">Microsoft Office<")
@@ -277,66 +276,6 @@ func pinCVProfilePhoto(doc string) string {
 	// ~12mm from left page edge, ~22mm from top (directly under name + CURRICULUM VITAE).
 	const pinned = `<wp:positionH relativeFrom="page"><wp:posOffset>432000</wp:posOffset></wp:positionH><wp:positionV relativeFrom="page"><wp:posOffset>792000</wp:posOffset></wp:positionV>`
 	return strings.Replace(doc, floating, pinned, 1)
-}
-
-// compactCVPage1LeftColumn removes the large empty-paragraph gap the master
-// template leaves between the photo/name block and PROFILE (legacy space for
-// VALUE PROPOSITION). That gap pushes PROFILE — and often the whole left
-// column — onto page 2.
-func compactCVPage1LeftColumn(doc string) string {
-	profStart, _, err := paragraphBounds(doc, ">PROFILE<", 0)
-	if err != nil || profStart <= 0 {
-		return doc
-	}
-
-	// Collect paragraph bounds from the candidate name through PROFILE.
-	nameStart, _, err := paragraphBounds(doc, "Name of Candidate", 0)
-	if err != nil {
-		nameStart, _, err = paragraphBounds(doc, "CURRICULUM VITAE", 0)
-		if err != nil {
-			return doc
-		}
-	}
-
-	type paraRange struct{ start, end int }
-	var paras []paraRange
-	pos := nameStart
-	for pos < profStart {
-		start, end, err := nextParagraph(doc, pos)
-		if err != nil || start >= profStart {
-			break
-		}
-		paras = append(paras, paraRange{start, end})
-		pos = end
-	}
-	if len(paras) == 0 {
-		return doc
-	}
-
-	// Keep name/title paragraphs, anything with a drawing (photo), and PROFILE.
-	// Drop empty spacer paragraphs in between.
-	var b strings.Builder
-	b.WriteString(doc[:nameStart])
-	kept := 0
-	for _, p := range paras {
-		para := doc[p.start:p.end]
-		keep := hasVisibleText(para) ||
-			strings.Contains(para, "<w:drawing>") ||
-			strings.Contains(para, ">PROFILE<") ||
-			strings.Contains(para, "CURRICULUM VITAE") ||
-			strings.Contains(para, "Name of Candidate")
-		if !keep {
-			continue
-		}
-		b.WriteString(para)
-		kept++
-	}
-	// Ensure we did not strip everything.
-	if kept < 2 {
-		return doc
-	}
-	b.WriteString(doc[profStart:])
-	return b.String()
 }
 
 // fillCVExperience replaces the template's two example experience blocks with

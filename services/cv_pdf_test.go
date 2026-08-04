@@ -197,43 +197,6 @@ func TestGenerateCVWordMatchesTemplateBasics(t *testing.T) {
 	if strings.Contains(xmlText, `<wp:positionV relativeFrom="paragraph"><wp:posOffset>130175</wp:posOffset></wp:positionV>`) {
 		t.Fatal("profile photo still uses paragraph anchoring")
 	}
-
-	// Left-column spacer gap under the photo must be compacted so PROFILE
-	// stays on page 1 (legacy VALUE PROPOSITION empty paragraphs removed).
-	nameIdx := strings.Index(xmlText, ">Jane Doe<")
-	if nameIdx < 0 {
-		nameIdx = strings.Index(xmlText, "Jane")
-	}
-	profIdx := strings.Index(xmlText, ">PROFILE<")
-	if nameIdx >= 0 && profIdx > nameIdx {
-		gap := xmlText[nameIdx:profIdx]
-		emptyParas := 0
-		pos := 0
-		for {
-			start := strings.Index(gap[pos:], "<w:p ")
-			alt := strings.Index(gap[pos:], "<w:p>")
-			if alt >= 0 && (start < 0 || alt < start) {
-				start = alt
-			}
-			if start < 0 {
-				break
-			}
-			start += pos
-			end := strings.Index(gap[start:], "</w:p>")
-			if end < 0 {
-				break
-			}
-			end = start + end + len("</w:p>")
-			para := gap[start:end]
-			if !hasVisibleText(para) && !strings.Contains(para, "<w:drawing>") {
-				emptyParas++
-			}
-			pos = end
-		}
-		if emptyParas > 2 {
-			t.Fatalf("left-column empty spacer paragraphs = %d, want <= 2 so PROFILE stays on page 1", emptyParas)
-		}
-	}
 }
 
 func TestGenerateCVWordExportsFullContent(t *testing.T) {

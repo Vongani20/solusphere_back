@@ -3,6 +3,7 @@ package services
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/xml"
 	"io"
 	"strings"
 	"testing"
@@ -70,6 +71,20 @@ func TestPinCVProfilePhotoUsesPageAnchor(t *testing.T) {
 	}
 }
 
+func TestGenerateCVWordProducesValidDocumentXML(t *testing.T) {
+	svc := NewCVPDFService()
+	data, err := svc.GenerateWord(sampleCVProfile())
+	if err != nil {
+		t.Fatalf("GenerateWord: %v", err)
+	}
+
+	xmlBytes := officeXMLBytesFromDocx(t, data, "word/document.xml")
+	var node struct{}
+	if err := xml.Unmarshal(xmlBytes, &node); err != nil {
+		t.Fatalf("word/document.xml should be well-formed XML: %v", err)
+	}
+}
+
 func cvMasterTemplateDocxBytes() ([]byte, error) {
 	// Read embedded template document.xml via GenerateWord empty path is heavy;
 	// use zip of embedded bytes.
@@ -89,4 +104,29 @@ func cvMasterTemplateDocxBytes() ([]byte, error) {
 		return io.ReadAll(rc)
 	}
 	return nil, io.ErrUnexpectedEOF
+}
+
+func officeXMLBytesFromDocx(t *testing.T, data []byte, path string) []byte {
+	t.Helper()
+	r, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatalf("open generated docx: %v", err)
+	}
+	for _, f := range r.File {
+		if f.Name != path {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			t.Fatalf("open %s: %v", path, err)
+		}
+		defer rc.Close()
+		b, err := io.ReadAll(rc)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		return b
+	}
+	t.Fatalf("missing %s", path)
+	return nil
 }

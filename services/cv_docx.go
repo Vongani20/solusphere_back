@@ -114,6 +114,7 @@ func (s *CVPDFService) GenerateWord(profile *models.CVProfile) ([]byte, error) {
 // a template placeholder.
 func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
 	doc = pinCVSidebarTable(doc)
+	doc = pinCVProfilePhoto(doc)
 
 	// Item paragraph templates, extracted from the pristine document.
 	bulletTemplate, err := extractParagraph(doc, ">Microsoft Office<")
@@ -264,6 +265,16 @@ func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
 func pinCVSidebarTable(doc string) string {
 	const floating = `w:vertAnchor="text" w:horzAnchor="page" w:tblpX="6751" w:tblpY="2572"`
 	const pinned = `w:vertAnchor="page" w:horzAnchor="page" w:tblpX="6751" w:tblpY="1021"`
+	return strings.Replace(doc, floating, pinned, 1)
+}
+
+// pinCVProfilePhoto keeps the candidate photo on page 1, top-left, under the
+// name/header. The master template anchors it to a paragraph, so after PROFILE
+// rewrites it can drift down the page or onto page 2.
+func pinCVProfilePhoto(doc string) string {
+	const floating = `<wp:positionH relativeFrom="column"><wp:posOffset>386715</wp:posOffset></wp:positionH><wp:positionV relativeFrom="paragraph"><wp:posOffset>130175</wp:posOffset></wp:positionV>`
+	// ~12mm from left page edge, ~28mm from top (below name + CURRICULUM VITAE).
+	const pinned = `<wp:positionH relativeFrom="page"><wp:posOffset>432000</wp:posOffset></wp:positionH><wp:positionV relativeFrom="page"><wp:posOffset>1008000</wp:posOffset></wp:positionV>`
 	return strings.Replace(doc, floating, pinned, 1)
 }
 

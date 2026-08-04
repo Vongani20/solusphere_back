@@ -140,11 +140,12 @@ func (s *CVPDFService) drawPage1(pdf *fpdf.Fpdf, profile *models.CVProfile) cvSi
 	contentTopY := cvHeaderBottom
 	leftY := contentTopY
 
+	// Photo + PROFILE stay on page 1, top-left column (under the name header).
 	photoH := 52.0
 	s.drawPhoto(pdf, cvCol1X, leftY, cvCol1W, photoH, profile.ProfilePhotoURL)
 	leftY += photoH + 5
 
-	leftY = s.drawLeftWrappedSection(pdf, "PROFILE", profile.ProfileText, "[Insert profile summary].", cvCol1X, leftY, cvCol1W, cvContentBottom-8)
+	_ = s.drawLeftWrappedSection(pdf, "PROFILE", profile.ProfileText, "[Insert profile summary].", cvCol1X, leftY, cvCol1W, cvContentBottom-8)
 
 	boxTop := contentTopY
 	boxH := cvContentBottom - boxTop - 2

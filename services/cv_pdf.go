@@ -145,8 +145,6 @@ func (s *CVPDFService) drawPage1(pdf *fpdf.Fpdf, profile *models.CVProfile) cvSi
 	leftY += photoH + 5
 
 	leftY = s.drawLeftWrappedSection(pdf, "PROFILE", profile.ProfileText, "[Insert profile summary].", cvCol1X, leftY, cvCol1W, cvContentBottom-8)
-	leftY += 3
-	s.drawLeftWrappedSection(pdf, "VALUE PROPOSITION", profile.ValueProposition, "[Insert value proposition. Describe how you apply your skills to produce outcomes or solve problems.]", cvCol1X, leftY, cvCol1W, cvContentBottom-8)
 
 	boxTop := contentTopY
 	boxH := cvContentBottom - boxTop - 2
@@ -542,14 +540,10 @@ func (s *CVPDFService) drawPersonalDetails(pdf *fpdf.Fpdf, profile *models.CVPro
 	if profile.Nationality != "" {
 		rows = append(rows, row{"Nationality:", profile.Nationality})
 	}
-	if profile.DateOfBirth != "" {
-		rows = append(rows, row{"Date of birth:", formatCVDate(profile.DateOfBirth)})
-	}
 	if len(rows) == 0 {
 		rows = []row{
 			{"Gender:", "[Insert gender]"},
 			{"Nationality:", "[Insert nationality]"},
-			{"Date of birth:", "dd Month yyyy"},
 		}
 	}
 

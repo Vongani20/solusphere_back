@@ -143,9 +143,9 @@ func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
 		return "", err
 	}
 
-	// ---- Profile + value proposition (left column, page 1) ----
-	// PROFILE / VALUE PROPOSITION stay on page 1; EXPERIENCE follows a page
-	// break so it always starts on page 2. All three share left indent 567.
+	// ---- Profile (left column, page 1) ----
+	// PROFILE stays on page 1; EXPERIENCE follows a page break so it always
+	// starts on page 2. Both share left indent 567.
 	_, headEnd, err := paragraphBounds(doc, ">PROFILE<", 0)
 	if err != nil {
 		return "", err
@@ -158,10 +158,6 @@ func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	headingPara, err := extractParagraph(doc, ">PROFILE<")
-	if err != nil {
-		return "", err
-	}
 	alignedBody, err := cvAlignedBodyParagraph(doc, bodyStart, expStart)
 	if err != nil {
 		return "", err
@@ -169,13 +165,10 @@ func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
 
 	profilePara := injectRunBeforeClose(alignedBody,
 		cvBodyRun(orCVPlaceholder(profile.ProfileText, "[Insert profile]")))
-	vpHeading := stripParaIDs(strings.Replace(headingPara, ">PROFILE<", ">VALUE PROPOSITION<", 1))
-	vpPara := stripParaIDs(injectRunBeforeClose(alignedBody,
-		cvBodyRun(orCVPlaceholder(profile.ValueProposition, "[Insert value proposition]"))))
 	// Keep EXPERIENCE on page 2 (master template has a page break here; the
-	// profile/VP rewrite must re-insert it because that zone is replaced).
+	// profile rewrite must re-insert it because that zone is replaced).
 	pageBreak := cvExperiencePageBreak(doc, bodyStart, expStart)
-	doc = doc[:bodyStart] + profilePara + vpHeading + vpPara + pageBreak + doc[expStart:]
+	doc = doc[:bodyStart] + profilePara + pageBreak + doc[expStart:]
 
 	// ---- Candidate name ----
 	name := strings.TrimSpace(profile.FirstName + " " + profile.LastName)
@@ -244,16 +237,14 @@ func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
 		return "", err
 	}
 
-	// ---- Personal details: nationality + date of birth ----
+	// ---- Personal details: nationality ----
 	natStart, natEnd, err := paragraphBounds(doc, "Nationality:", 0)
 	if err != nil {
 		return "", err
 	}
 	natPara := strings.Replace(doc[natStart:natEnd], ">South African<",
 		">"+xmlEscapeCV(orCVPlaceholder(profile.Nationality, "[Insert nationality]"))+"<", 1)
-	dobPara := strings.Replace(natPara, ">Nationality:<", ">Date of Birth:<", 1)
-	dobPara = replaceLastRunText(dobPara, xmlEscapeCV(orCVPlaceholder(formatCVDate(profile.DateOfBirth), "dd Month yyyy")))
-	doc = doc[:natStart] + natPara + stripParaIDs(dobPara) + doc[natEnd:]
+	doc = doc[:natStart] + natPara + doc[natEnd:]
 
 	// ---- Personal details: gender (value split across two runs: "M"+"ale") ----
 	return replaceWithinParagraph(doc, "Gender:", func(para string) string {

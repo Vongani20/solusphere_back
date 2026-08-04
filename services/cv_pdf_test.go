@@ -121,11 +121,8 @@ func TestGenerateCVWordMatchesTemplateBasics(t *testing.T) {
 		"Jane Doe",
 		"CURRICULUM VITAE",
 		"PROFILE",
-		"VALUE PROPOSITION",
-		"Date of Birth",
 		"Female",
 		"South African",
-		"15 June 1990",
 		"Process Management",
 		"Lean Six Sigma",
 		"BCom Information Systems",
@@ -141,14 +138,14 @@ func TestGenerateCVWordMatchesTemplateBasics(t *testing.T) {
 			t.Fatalf("expected document.xml to contain %q", want)
 		}
 	}
-	for _, stale := range []string{"Name of Candidate", ">Male<", "Job Title"} {
+	for _, stale := range []string{"Name of Candidate", ">Male<", "Job Title", "VALUE PROPOSITION", "Date of Birth"} {
 		if strings.Contains(xmlText, stale) {
 			t.Fatalf("expected placeholder %q to be replaced", stale)
 		}
 	}
 
-	// PROFILE, VALUE PROPOSITION, and EXPERIENCE must share left indent 567.
-	for _, heading := range []string{">PROFILE<", ">VALUE PROPOSITION<", ">EXPERIENCE<"} {
+	// PROFILE and EXPERIENCE must share left indent 567.
+	for _, heading := range []string{">PROFILE<", ">EXPERIENCE<"} {
 		start, end, err := paragraphBounds(xmlText, heading, 0)
 		if err != nil {
 			t.Fatalf("heading %s: %v", heading, err)

@@ -144,14 +144,8 @@ func validateCVProfile(p *models.CVProfile) map[string]string {
 	if p.Nationality == "" {
 		errs["nationality"] = "Nationality is required"
 	}
-	if p.DateOfBirth == "" {
-		errs["date_of_birth"] = "Date of birth is required"
-	}
 	if p.ProfileText == "" {
 		errs["profile_text"] = "Profile is required"
-	}
-	if p.ValueProposition == "" {
-		errs["value_proposition"] = "Value proposition is required"
 	}
 
 	return errs

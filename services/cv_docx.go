@@ -170,6 +170,7 @@ func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
 	// profile rewrite must re-insert it because that zone is replaced).
 	pageBreak := cvExperiencePageBreak(doc, bodyStart, expStart)
 	doc = doc[:bodyStart] + profilePara + pageBreak + doc[expStart:]
+	doc = moveCVSidebarTableAfterProfile(doc)
 
 	// ---- Candidate name ----
 	name := strings.TrimSpace(profile.FirstName + " " + profile.LastName)
@@ -266,6 +267,35 @@ func pinCVSidebarTable(doc string) string {
 	const floating = `w:vertAnchor="text" w:horzAnchor="page" w:tblpX="6751" w:tblpY="2572"`
 	const pinned = `w:vertAnchor="page" w:horzAnchor="page" w:tblpX="6751" w:tblpY="1021"`
 	return strings.Replace(doc, floating, pinned, 1)
+}
+
+// moveCVSidebarTableAfterProfile moves the big floating sidebar table so it no
+// longer appears as the first body block. Word was laying out the normal-flow
+// left column after that table, which pushed the name/profile onto page 2.
+// The table remains page-anchored, but its anchor now sits near the page-1
+// break so the left-column text can stay on page 1.
+func moveCVSidebarTableAfterProfile(doc string) string {
+	tblStart := strings.Index(doc, "<w:tbl>")
+	if tblStart < 0 {
+		return doc
+	}
+	tblEnd := strings.Index(doc[tblStart:], "</w:tbl>")
+	if tblEnd < 0 {
+		return doc
+	}
+	tblEnd += tblStart + len("</w:tbl>")
+	tableXML := doc[tblStart:tblEnd]
+	without := doc[:tblStart] + doc[tblEnd:]
+
+	pageBreakStart, _, err := paragraphBounds(without, `w:type="page"`, 0)
+	if err != nil {
+		expStart, _, expErr := paragraphBounds(without, ">EXPERIENCE<", 0)
+		if expErr != nil {
+			return doc
+		}
+		pageBreakStart = expStart
+	}
+	return without[:pageBreakStart] + tableXML + without[pageBreakStart:]
 }
 
 // pinCVProfilePhoto keeps the candidate photo on page 1, top-left, under the

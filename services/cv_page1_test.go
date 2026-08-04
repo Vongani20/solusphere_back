@@ -85,6 +85,28 @@ func TestGenerateCVWordProducesValidDocumentXML(t *testing.T) {
 	}
 }
 
+func TestMoveCVSidebarTableAfterProfile(t *testing.T) {
+	raw, err := cvMasterTemplateDocxBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := pinCVSidebarTable(string(raw))
+	out := moveCVSidebarTableAfterProfile(doc)
+	if out == doc {
+		t.Fatal("expected sidebar table to move")
+	}
+
+	profIdx := strings.Index(out, ">PROFILE<")
+	tblIdx := strings.Index(out, "<w:tbl>")
+	brIdx := strings.Index(out, `w:type="page"`)
+	if profIdx < 0 || tblIdx < 0 || brIdx < 0 {
+		t.Fatalf("missing expected markers: profile=%d table=%d break=%d", profIdx, tblIdx, brIdx)
+	}
+	if !(profIdx < tblIdx && tblIdx < brIdx) {
+		t.Fatalf("expected PROFILE before sidebar table before page break, got profile=%d table=%d break=%d", profIdx, tblIdx, brIdx)
+	}
+}
+
 func cvMasterTemplateDocxBytes() ([]byte, error) {
 	// Read embedded template document.xml via GenerateWord empty path is heavy;
 	// use zip of embedded bytes.

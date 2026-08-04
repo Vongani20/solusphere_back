@@ -189,6 +189,13 @@ func TestGenerateCVWordMatchesTemplateBasics(t *testing.T) {
 	if strings.Contains(xmlText, `w:vertAnchor="text"`) {
 		t.Fatal("sidebar table still uses text anchoring")
 	}
+	if tblIdx := strings.Index(xmlText, "<w:tbl>"); tblIdx >= 0 {
+		profIdx := strings.Index(xmlText, ">PROFILE<")
+		expBreakIdx := strings.Index(xmlText, `w:type="page"`)
+		if profIdx >= 0 && expBreakIdx >= 0 && !(profIdx < tblIdx && tblIdx < expBreakIdx) {
+			t.Fatalf("sidebar table should anchor after PROFILE but before the page break (profile=%d table=%d break=%d)", profIdx, tblIdx, expBreakIdx)
+		}
+	}
 
 	// Profile photo must stay on page 1 top-left (page-anchored, not paragraph).
 	if !strings.Contains(xmlText, `<wp:positionH relativeFrom="page"><wp:posOffset>432000</wp:posOffset></wp:positionH><wp:positionV relativeFrom="page"><wp:posOffset>792000</wp:posOffset></wp:positionV>`) {

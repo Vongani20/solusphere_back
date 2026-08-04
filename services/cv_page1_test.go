@@ -66,8 +66,8 @@ func TestPinCVProfilePhotoUsesPageAnchor(t *testing.T) {
 	if !strings.Contains(out, `relativeFrom="page"><wp:posOffset>432000</wp:posOffset>`) {
 		t.Fatal("expected page-relative horizontal pin")
 	}
-	if !strings.Contains(out, `relativeFrom="page"><wp:posOffset>792000</wp:posOffset>`) {
-		t.Fatal("expected page-relative vertical pin under the name")
+	if !strings.Contains(out, `relativeFrom="page"><wp:posOffset>1404000</wp:posOffset>`) {
+		t.Fatal("expected page-relative vertical pin below the name/title")
 	}
 }
 

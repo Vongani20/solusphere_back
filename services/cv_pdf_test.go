@@ -198,7 +198,7 @@ func TestGenerateCVWordMatchesTemplateBasics(t *testing.T) {
 	}
 
 	// Profile photo must stay on page 1 top-left (page-anchored, not paragraph).
-	if !strings.Contains(xmlText, `<wp:positionH relativeFrom="page"><wp:posOffset>432000</wp:posOffset></wp:positionH><wp:positionV relativeFrom="page"><wp:posOffset>792000</wp:posOffset></wp:positionV>`) {
+	if !strings.Contains(xmlText, `<wp:positionH relativeFrom="page"><wp:posOffset>432000</wp:posOffset></wp:positionH><wp:positionV relativeFrom="page"><wp:posOffset>1404000</wp:posOffset></wp:positionV>`) {
 		t.Fatal("profile photo should be page-anchored on page 1 top-left")
 	}
 	if strings.Contains(xmlText, `<wp:positionV relativeFrom="paragraph"><wp:posOffset>130175</wp:posOffset></wp:positionV>`) {

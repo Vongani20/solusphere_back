@@ -303,8 +303,9 @@ func moveCVSidebarTableAfterProfile(doc string) string {
 // rewrites it can drift down the page or onto page 2.
 func pinCVProfilePhoto(doc string) string {
 	const floating = `<wp:positionH relativeFrom="column"><wp:posOffset>386715</wp:posOffset></wp:positionH><wp:positionV relativeFrom="paragraph"><wp:posOffset>130175</wp:posOffset></wp:positionV>`
-	// ~12mm from left page edge, ~22mm from top (directly under name + CURRICULUM VITAE).
-	const pinned = `<wp:positionH relativeFrom="page"><wp:posOffset>432000</wp:posOffset></wp:positionH><wp:positionV relativeFrom="page"><wp:posOffset>792000</wp:posOffset></wp:positionV>`
+	// ~12mm from left page edge, ~39mm from top so the photo sits below the
+	// candidate name and CURRICULUM VITAE title instead of overlapping them.
+	const pinned = `<wp:positionH relativeFrom="page"><wp:posOffset>432000</wp:posOffset></wp:positionH><wp:positionV relativeFrom="page"><wp:posOffset>1404000</wp:posOffset></wp:positionV>`
 	return strings.Replace(doc, floating, pinned, 1)
 }
 

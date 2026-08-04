@@ -69,6 +69,10 @@ func TestGenerateCVWordKeepsProfileOnPage1(t *testing.T) {
 	if !strings.Contains(xmlText, `<w:gridCol w:w="5600"/><w:gridCol w:w="4464"/>`) {
 		t.Fatal("expected fixed two-column page-1 grid")
 	}
+	_, nameParaEnd, err := paragraphBounds(xmlText, ">Mbodi Awelani<", 0)
+	if err != nil || !strings.Contains(xmlText[nameParaEnd-900:nameParaEnd], `w:right="0"`) {
+		t.Fatal("candidate-name paragraph must not retain the legacy sidebar right indent")
+	}
 }
 
 func TestLayoutCVPage1SideBySide(t *testing.T) {

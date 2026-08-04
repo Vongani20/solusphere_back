@@ -301,6 +301,11 @@ func layoutCVPage1SideBySide(doc string) string {
 	if !strings.Contains(leftInner, ">PROFILE<") {
 		return doc
 	}
+	// The master template's left-column paragraphs reserve 4421 twips on the
+	// right for the original floating sidebar. In a 5600-twip table cell that
+	// leaves only a few characters of usable width, causing words to stack
+	// vertically. Remove that legacy reservation for the normal-flow cell.
+	leftInner = normalizeCVPage1LeftColumnWidth(leftInner)
 
 	bodyOpen := strings.Index(doc, "<w:body>")
 	if bodyOpen < 0 {
@@ -309,6 +314,16 @@ func layoutCVPage1SideBySide(doc string) string {
 	bodyContentStart := bodyOpen + len("<w:body>")
 	page1 := cvPage1TwoColumnTable(leftInner, sidebar)
 	return doc[:bodyContentStart] + page1 + doc[brStart:]
+}
+
+func normalizeCVPage1LeftColumnWidth(left string) string {
+	left = strings.ReplaceAll(left,
+		`<w:ind w:left="567" w:right="4421"/>`,
+		`<w:ind w:left="567" w:right="0"/>`)
+	// Some template paragraphs contain an equivalent left/right pair with
+	// extra attributes. The right indent is the cause of the collapsed text.
+	left = strings.ReplaceAll(left, ` w:right="4421"`, ` w:right="0"`)
+	return left
 }
 
 // stripCVFloatingTableProps removes absolute positioning so the sidebar can sit

@@ -52,13 +52,13 @@ func TestGenerateCVWordKeepsProfileOnPage1(t *testing.T) {
 		t.Fatalf("PROFILE body must be on page 1 before EXPERIENCE page break (body=%d break=%d)", bodyIdx, breakIdx)
 	}
 
-	// PERSONAL DETAILS sidebar must also stay on page 1 (anchor before page break).
+	// Master template order: floating sidebar table first, then name/PROFILE.
 	tblIdx := strings.Index(xmlText, "<w:tbl>")
 	if tblIdx < 0 || tblIdx > breakIdx {
-		t.Fatalf("PERSONAL DETAILS sidebar must be on page 1 before EXPERIENCE page break (table=%d break=%d)", tblIdx, breakIdx)
+		t.Fatalf("PERSONAL DETAILS sidebar must be before EXPERIENCE page break (table=%d break=%d)", tblIdx, breakIdx)
 	}
-	if !(nameIdx < tblIdx && tblIdx < breakIdx) {
-		t.Fatalf("expected name(%d) < sidebar(%d) < pageBreak(%d)", nameIdx, tblIdx, breakIdx)
+	if !(tblIdx < nameIdx && nameIdx < profIdx && profIdx < breakIdx) {
+		t.Fatalf("expected master order sidebar(%d) < name(%d) < PROFILE(%d) < pageBreak(%d)", tblIdx, nameIdx, profIdx, breakIdx)
 	}
 	if !strings.Contains(xmlText[:breakIdx], "PERSONAL") {
 		t.Fatal("expected PERSONAL DETAILS content before EXPERIENCE page break")
@@ -97,28 +97,61 @@ func TestGenerateCVWordProducesValidDocumentXML(t *testing.T) {
 	}
 }
 
-func TestMoveCVSidebarTableAfterName(t *testing.T) {
+func TestCompactCVPage1LeftColumnRemovesSpacers(t *testing.T) {
 	raw, err := cvMasterTemplateDocxBytes()
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc := pinCVSidebarTable(string(raw))
-	out := moveCVSidebarTableAfterName(doc)
+	doc := string(raw)
+	out := compactCVPage1LeftColumn(doc)
 	if out == doc {
-		t.Fatal("expected sidebar table to move")
+		t.Fatal("expected VALUE PROPOSITION spacer paragraphs to be removed")
+	}
+	if len(out) >= len(doc) {
+		t.Fatalf("compact should shrink document.xml: before=%d after=%d", len(doc), len(out))
 	}
 
-	cvIdx := strings.Index(out, "CURRICULUM VITAE")
-	tblIdx := strings.Index(out, "<w:tbl>")
-	profIdx := strings.Index(out, ">PROFILE<")
-	brIdx := strings.Index(out, `w:type="page"`)
-	if cvIdx < 0 || tblIdx < 0 || profIdx < 0 || brIdx < 0 {
-		t.Fatalf("missing expected markers: cv=%d table=%d profile=%d break=%d", cvIdx, tblIdx, profIdx, brIdx)
+	before := countEmptyParasBetween(doc, "Name of Candidate", ">PROFILE<")
+	after := countEmptyParasBetween(out, "Name of Candidate", ">PROFILE<")
+	if before < 5 {
+		t.Fatalf("fixture expectation: master template should have many spacers before PROFILE, got %d", before)
 	}
-	// Sidebar must anchor early on page 1 (after title, before PROFILE/page break).
-	if !(cvIdx < tblIdx && tblIdx < profIdx && tblIdx < brIdx) {
-		t.Fatalf("expected CURRICULUM VITAE < sidebar < PROFILE < page break, got cv=%d table=%d profile=%d break=%d", cvIdx, tblIdx, profIdx, brIdx)
+	if after > 2 {
+		t.Fatalf("expected at most 2 empty top-level paragraphs between name and PROFILE, before=%d after=%d", before, after)
 	}
+	if !strings.Contains(out, "<w:drawing>") || !strings.Contains(out, ">PROFILE<") {
+		t.Fatal("compact must keep photo drawing and PROFILE")
+	}
+
+	var node struct{}
+	if err := xml.Unmarshal([]byte(out), &node); err != nil {
+		t.Fatalf("compacted document.xml must stay well-formed: %v", err)
+	}
+}
+
+func countEmptyParasBetween(doc, startMarker, endMarker string) int {
+	start, _, err := paragraphBounds(doc, startMarker, 0)
+	if err != nil {
+		return -1
+	}
+	end, _, err := paragraphBounds(doc, endMarker, 0)
+	if err != nil {
+		return -1
+	}
+	empties := 0
+	pos := start
+	for pos < end {
+		pStart, pEnd, err := nextParagraphDepth(doc, pos)
+		if err != nil || pStart >= end {
+			break
+		}
+		para := doc[pStart:pEnd]
+		if !hasVisibleText(para) && !strings.Contains(para, "<w:drawing>") {
+			empties++
+		}
+		pos = pEnd
+	}
+	return empties
 }
 
 func cvMasterTemplateDocxBytes() ([]byte, error) {

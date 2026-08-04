@@ -18,9 +18,10 @@ import (
 	"solusphere_backend/models"
 )
 
-// The SoluGrowth CV Master Template (docs/CV Master Template.docx). The Word
-// download fills this template in place so the output matches the official
-// branded layout exactly (header logo, icons, table layout, footer).
+// The SoluGrowth CV Master Template, kept in sync with
+// docs/CV Master Template.docx. The Word download fills this template in place
+// so the output matches the official branded layout exactly (header logo,
+// icons, table layout, footer).
 //
 //go:embed assets/cv_master_template.docx
 var cvMasterTemplateDocx []byte
@@ -115,6 +116,10 @@ func (s *CVPDFService) GenerateWord(profile *models.CVProfile) ([]byte, error) {
 func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
 	doc = pinCVSidebarTable(doc)
 	doc = pinCVProfilePhoto(doc)
+	// Master template keeps the floating sidebar table first, then name/photo/
+	// PROFILE. Remove only the empty VALUE PROPOSITION spacer gap so PROFILE
+	// stays on page 1 beside the sidebar (do not relocate the table).
+	doc = compactCVPage1LeftColumn(doc)
 
 	// Item paragraph templates, extracted from the pristine document.
 	bulletTemplate, err := extractParagraph(doc, ">Microsoft Office<")
@@ -177,10 +182,6 @@ func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
 		name = "[First Name] [Surname]"
 	}
 	doc = strings.Replace(doc, ">Name of Candidate<", ">"+xmlEscapeCV(name)+"<", 1)
-
-	// Anchor the floating sidebar on page 1 immediately after the name so
-	// PERSONAL DETAILS stays top-right on page 1 (not after the page break).
-	doc = moveCVSidebarTableAfterName(doc)
 
 	// ---- Languages (template already has one entry: English) ----
 	languages := profile.Languages
@@ -272,41 +273,6 @@ func pinCVSidebarTable(doc string) string {
 	return strings.Replace(doc, floating, pinned, 1)
 }
 
-// moveCVSidebarTableAfterName moves the floating sidebar table so it is not the
-// first body block (which pushed name/profile onto page 2), but still anchors
-// early on page 1 — immediately after the candidate name. Word places
-// page-anchored floating tables on the page of their document-flow anchor; if
-// the table sits near the EXPERIENCE page break, PERSONAL DETAILS lands on page 2.
-func moveCVSidebarTableAfterName(doc string) string {
-	tblStart := strings.Index(doc, "<w:tbl>")
-	if tblStart < 0 {
-		return doc
-	}
-	tblEnd := strings.Index(doc[tblStart:], "</w:tbl>")
-	if tblEnd < 0 {
-		return doc
-	}
-	tblEnd += tblStart + len("</w:tbl>")
-	tableXML := doc[tblStart:tblEnd]
-	without := doc[:tblStart] + doc[tblEnd:]
-
-	_, nameEnd, err := paragraphBounds(without, "CURRICULUM VITAE", 0)
-	if err != nil {
-		// Fallback: first non-empty left-column paragraph after body start.
-		_, nameEnd, err = paragraphBounds(without, ">PROFILE<", 0)
-		if err != nil {
-			return doc
-		}
-	}
-
-	// Avoid inserting past the page break (that recreates the page-2 sidebar bug).
-	if brStart, _, brErr := paragraphBounds(without, `w:type="page"`, 0); brErr == nil && nameEnd > brStart {
-		return doc
-	}
-
-	return without[:nameEnd] + tableXML + without[nameEnd:]
-}
-
 // pinCVProfilePhoto keeps the candidate photo on page 1, top-left, under the
 // name/header. The master template anchors it to a paragraph, so after PROFILE
 // rewrites it can drift down the page or onto page 2.
@@ -318,6 +284,102 @@ func pinCVProfilePhoto(doc string) string {
 	return strings.Replace(doc, floating, pinned, 1)
 }
 
+// compactCVPage1LeftColumn removes the empty-paragraph gap the master template
+// leaves between the photo and PROFILE (legacy VALUE PROPOSITION space). That
+// gap pushes PROFILE onto a later page once the sidebar is filled.
+//
+// Paragraph ends are depth-aware so drawings/textboxes with nested <w:p> are
+// not truncated (naive </w:p> matching previously corrupted document.xml).
+func compactCVPage1LeftColumn(doc string) string {
+	profStart, _, err := paragraphBounds(doc, ">PROFILE<", 0)
+	if err != nil || profStart <= 0 {
+		return doc
+	}
+	nameStart, _, err := paragraphBounds(doc, "Name of Candidate", 0)
+	if err != nil {
+		nameStart, _, err = paragraphBounds(doc, "CURRICULUM VITAE", 0)
+		if err != nil {
+			return doc
+		}
+	}
+
+	type paraRange struct{ start, end int }
+	var paras []paraRange
+	pos := nameStart
+	for pos < profStart {
+		start, end, err := nextParagraphDepth(doc, pos)
+		if err != nil || start >= profStart {
+			break
+		}
+		paras = append(paras, paraRange{start, end})
+		pos = end
+	}
+	if len(paras) == 0 {
+		return doc
+	}
+
+	var b strings.Builder
+	b.WriteString(doc[:nameStart])
+	kept := 0
+	for _, p := range paras {
+		para := doc[p.start:p.end]
+		keep := hasVisibleText(para) ||
+			strings.Contains(para, "<w:drawing>") ||
+			strings.Contains(para, "CURRICULUM VITAE") ||
+			strings.Contains(para, "Name of Candidate")
+		if !keep {
+			continue
+		}
+		b.WriteString(para)
+		kept++
+	}
+	if kept < 2 {
+		return doc
+	}
+	b.WriteString(doc[profStart:])
+	return b.String()
+}
+
+// paragraphEndDepth returns the index after the matching </w:p> for the
+// paragraph that starts at start, counting nested <w:p> / <w:p ...> inside
+// drawings/text boxes.
+func paragraphEndDepth(doc string, start int) int {
+	depth := 0
+	for i := start; i < len(doc); {
+		if strings.HasPrefix(doc[i:], "<w:p>") || strings.HasPrefix(doc[i:], "<w:p ") {
+			depth++
+			gt := strings.IndexByte(doc[i:], '>')
+			if gt < 0 {
+				return len(doc)
+			}
+			i += gt + 1
+			continue
+		}
+		if strings.HasPrefix(doc[i:], "</w:p>") {
+			depth--
+			i += len("</w:p>")
+			if depth == 0 {
+				return i
+			}
+			continue
+		}
+		i++
+	}
+	return len(doc)
+}
+
+func nextParagraphDepth(doc string, pos int) (int, int, error) {
+	start := strings.Index(doc[pos:], "<w:p ")
+	if alt := strings.Index(doc[pos:], "<w:p>"); alt >= 0 && (start < 0 || alt < start) {
+		start = alt
+	}
+	if start < 0 {
+		return 0, 0, fmt.Errorf("CV template: no paragraph after position %d", pos)
+	}
+	start += pos
+	return start, paragraphEndDepth(doc, start), nil
+}
+
 // fillCVExperience replaces the template's two example experience blocks with
 // one generated block per experience entry.
 func fillCVExperience(doc string, entries []models.CVExperience) (string, error) {
@@ -325,11 +387,12 @@ func fillCVExperience(doc string, entries []models.CVExperience) (string, error)
 	if err != nil {
 		return "", err
 	}
-	positionT, err := extractParagraph(doc, ">Position: <")
+	// Master template splits labels/values across runs ("Position" + ": " + "Job" + " Title").
+	positionT, err := extractParagraph(doc, ">Position<")
 	if err != nil {
 		return "", err
 	}
-	periodT, err := extractParagraph(doc, ">Period: <")
+	periodT, err := extractParagraph(doc, ">Period<")
 	if err != nil {
 		return "", err
 	}
@@ -340,7 +403,7 @@ func fillCVExperience(doc string, entries []models.CVExperience) (string, error)
 
 	// Spacer between period and scope heading, and the empty list paragraph
 	// used for scope-of-work lines.
-	_, periodEnd, err := paragraphBounds(doc, ">Period: <", 0)
+	_, periodEnd, err := paragraphBounds(doc, ">Period<", 0)
 	if err != nil {
 		return "", err
 	}
@@ -393,8 +456,8 @@ func fillCVExperience(doc string, entries []models.CVExperience) (string, error)
 		period := orCVPlaceholder(formatCVPeriod(exp.PeriodStart, exp.PeriodEnd), "[Month yyyy - Month yyyy]")
 
 		blocks.WriteString(stripParaIDs(strings.Replace(companyT, ">Name<", ">"+xmlEscapeCV(company)+"<", 1)))
-		blocks.WriteString(stripParaIDs(strings.Replace(positionT, ">Job Title<", ">"+xmlEscapeCV(position)+"<", 1)))
-		blocks.WriteString(stripParaIDs(strings.Replace(periodT, ">April 2025 - Current<", ">"+xmlEscapeCV(period)+"<", 1)))
+		blocks.WriteString(stripParaIDs(fillCVSplitRunValue(positionT, ">Job</w:t>", "> Title</w:t>", position)))
+		blocks.WriteString(stripParaIDs(fillCVSplitRunValue(periodT, ">April</w:t>", "> 2025 - Current</w:t>", period)))
 		blocks.WriteString(stripParaIDs(spacerT))
 		blocks.WriteString(stripParaIDs(scopeHeadT))
 
@@ -412,6 +475,14 @@ func fillCVExperience(doc string, entries []models.CVExperience) (string, error)
 	}
 
 	return doc[:blockStart] + blocks.String() + doc[rangeEnd:], nil
+}
+
+// fillCVSplitRunValue writes value into the first run marker and clears the
+// continuation run (master template often splits placeholder text across runs).
+func fillCVSplitRunValue(para, firstRunClose, contRunClose, value string) string {
+	para = strings.Replace(para, firstRunClose, ">"+xmlEscapeCV(value)+"</w:t>", 1)
+	para = strings.Replace(para, contRunClose, "></w:t>", 1)
+	return para
 }
 
 // cvExperiencePageBreak returns the template's page-break paragraph between

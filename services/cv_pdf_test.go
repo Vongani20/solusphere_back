@@ -192,8 +192,9 @@ func TestGenerateCVWordMatchesTemplateBasics(t *testing.T) {
 	if tblIdx := strings.Index(xmlText, "<w:tbl>"); tblIdx >= 0 {
 		nameIdx := strings.Index(xmlText, "CURRICULUM VITAE")
 		expBreakIdx := strings.Index(xmlText, `w:type="page"`)
-		if nameIdx >= 0 && expBreakIdx >= 0 && !(nameIdx < tblIdx && tblIdx < expBreakIdx) {
-			t.Fatalf("sidebar table should anchor on page 1 after title and before the page break (title=%d table=%d break=%d)", nameIdx, tblIdx, expBreakIdx)
+		// Master template keeps the floating sidebar before the left column.
+		if nameIdx >= 0 && expBreakIdx >= 0 && !(tblIdx < nameIdx && nameIdx < expBreakIdx) {
+			t.Fatalf("sidebar should stay before title in master template order (table=%d title=%d break=%d)", tblIdx, nameIdx, expBreakIdx)
 		}
 	}
 

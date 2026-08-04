@@ -190,10 +190,10 @@ func TestGenerateCVWordMatchesTemplateBasics(t *testing.T) {
 		t.Fatal("sidebar table still uses text anchoring")
 	}
 	if tblIdx := strings.Index(xmlText, "<w:tbl>"); tblIdx >= 0 {
-		profIdx := strings.Index(xmlText, ">PROFILE<")
+		nameIdx := strings.Index(xmlText, "CURRICULUM VITAE")
 		expBreakIdx := strings.Index(xmlText, `w:type="page"`)
-		if profIdx >= 0 && expBreakIdx >= 0 && !(profIdx < tblIdx && tblIdx < expBreakIdx) {
-			t.Fatalf("sidebar table should anchor after PROFILE but before the page break (profile=%d table=%d break=%d)", profIdx, tblIdx, expBreakIdx)
+		if nameIdx >= 0 && expBreakIdx >= 0 && !(nameIdx < tblIdx && tblIdx < expBreakIdx) {
+			t.Fatalf("sidebar table should anchor on page 1 after title and before the page break (title=%d table=%d break=%d)", nameIdx, tblIdx, expBreakIdx)
 		}
 	}
 

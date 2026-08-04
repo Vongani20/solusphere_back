@@ -170,7 +170,6 @@ func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
 	// profile rewrite must re-insert it because that zone is replaced).
 	pageBreak := cvExperiencePageBreak(doc, bodyStart, expStart)
 	doc = doc[:bodyStart] + profilePara + pageBreak + doc[expStart:]
-	doc = moveCVSidebarTableAfterProfile(doc)
 
 	// ---- Candidate name ----
 	name := strings.TrimSpace(profile.FirstName + " " + profile.LastName)
@@ -178,6 +177,10 @@ func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
 		name = "[First Name] [Surname]"
 	}
 	doc = strings.Replace(doc, ">Name of Candidate<", ">"+xmlEscapeCV(name)+"<", 1)
+
+	// Anchor the floating sidebar on page 1 immediately after the name so
+	// PERSONAL DETAILS stays top-right on page 1 (not after the page break).
+	doc = moveCVSidebarTableAfterName(doc)
 
 	// ---- Languages (template already has one entry: English) ----
 	languages := profile.Languages
@@ -269,12 +272,12 @@ func pinCVSidebarTable(doc string) string {
 	return strings.Replace(doc, floating, pinned, 1)
 }
 
-// moveCVSidebarTableAfterProfile moves the big floating sidebar table so it no
-// longer appears as the first body block. Word was laying out the normal-flow
-// left column after that table, which pushed the name/profile onto page 2.
-// The table remains page-anchored, but its anchor now sits near the page-1
-// break so the left-column text can stay on page 1.
-func moveCVSidebarTableAfterProfile(doc string) string {
+// moveCVSidebarTableAfterName moves the floating sidebar table so it is not the
+// first body block (which pushed name/profile onto page 2), but still anchors
+// early on page 1 — immediately after the candidate name. Word places
+// page-anchored floating tables on the page of their document-flow anchor; if
+// the table sits near the EXPERIENCE page break, PERSONAL DETAILS lands on page 2.
+func moveCVSidebarTableAfterName(doc string) string {
 	tblStart := strings.Index(doc, "<w:tbl>")
 	if tblStart < 0 {
 		return doc
@@ -287,15 +290,21 @@ func moveCVSidebarTableAfterProfile(doc string) string {
 	tableXML := doc[tblStart:tblEnd]
 	without := doc[:tblStart] + doc[tblEnd:]
 
-	pageBreakStart, _, err := paragraphBounds(without, `w:type="page"`, 0)
+	_, nameEnd, err := paragraphBounds(without, "CURRICULUM VITAE", 0)
 	if err != nil {
-		expStart, _, expErr := paragraphBounds(without, ">EXPERIENCE<", 0)
-		if expErr != nil {
+		// Fallback: first non-empty left-column paragraph after body start.
+		_, nameEnd, err = paragraphBounds(without, ">PROFILE<", 0)
+		if err != nil {
 			return doc
 		}
-		pageBreakStart = expStart
 	}
-	return without[:pageBreakStart] + tableXML + without[pageBreakStart:]
+
+	// Avoid inserting past the page break (that recreates the page-2 sidebar bug).
+	if brStart, _, brErr := paragraphBounds(without, `w:type="page"`, 0); brErr == nil && nameEnd > brStart {
+		return doc
+	}
+
+	return without[:nameEnd] + tableXML + without[nameEnd:]
 }
 
 // pinCVProfilePhoto keeps the candidate photo on page 1, top-left, under the

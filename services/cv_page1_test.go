@@ -51,6 +51,18 @@ func TestGenerateCVWordKeepsProfileOnPage1(t *testing.T) {
 	if bodyIdx < 0 || bodyIdx > breakIdx {
 		t.Fatalf("PROFILE body must be on page 1 before EXPERIENCE page break (body=%d break=%d)", bodyIdx, breakIdx)
 	}
+
+	// PERSONAL DETAILS sidebar must also stay on page 1 (anchor before page break).
+	tblIdx := strings.Index(xmlText, "<w:tbl>")
+	if tblIdx < 0 || tblIdx > breakIdx {
+		t.Fatalf("PERSONAL DETAILS sidebar must be on page 1 before EXPERIENCE page break (table=%d break=%d)", tblIdx, breakIdx)
+	}
+	if !(nameIdx < tblIdx && tblIdx < breakIdx) {
+		t.Fatalf("expected name(%d) < sidebar(%d) < pageBreak(%d)", nameIdx, tblIdx, breakIdx)
+	}
+	if !strings.Contains(xmlText[:breakIdx], "PERSONAL") {
+		t.Fatal("expected PERSONAL DETAILS content before EXPERIENCE page break")
+	}
 }
 
 func TestPinCVProfilePhotoUsesPageAnchor(t *testing.T) {
@@ -85,25 +97,27 @@ func TestGenerateCVWordProducesValidDocumentXML(t *testing.T) {
 	}
 }
 
-func TestMoveCVSidebarTableAfterProfile(t *testing.T) {
+func TestMoveCVSidebarTableAfterName(t *testing.T) {
 	raw, err := cvMasterTemplateDocxBytes()
 	if err != nil {
 		t.Fatal(err)
 	}
 	doc := pinCVSidebarTable(string(raw))
-	out := moveCVSidebarTableAfterProfile(doc)
+	out := moveCVSidebarTableAfterName(doc)
 	if out == doc {
 		t.Fatal("expected sidebar table to move")
 	}
 
-	profIdx := strings.Index(out, ">PROFILE<")
+	cvIdx := strings.Index(out, "CURRICULUM VITAE")
 	tblIdx := strings.Index(out, "<w:tbl>")
+	profIdx := strings.Index(out, ">PROFILE<")
 	brIdx := strings.Index(out, `w:type="page"`)
-	if profIdx < 0 || tblIdx < 0 || brIdx < 0 {
-		t.Fatalf("missing expected markers: profile=%d table=%d break=%d", profIdx, tblIdx, brIdx)
+	if cvIdx < 0 || tblIdx < 0 || profIdx < 0 || brIdx < 0 {
+		t.Fatalf("missing expected markers: cv=%d table=%d profile=%d break=%d", cvIdx, tblIdx, profIdx, brIdx)
 	}
-	if !(profIdx < tblIdx && tblIdx < brIdx) {
-		t.Fatalf("expected PROFILE before sidebar table before page break, got profile=%d table=%d break=%d", profIdx, tblIdx, brIdx)
+	// Sidebar must anchor early on page 1 (after title, before PROFILE/page break).
+	if !(cvIdx < tblIdx && tblIdx < profIdx && tblIdx < brIdx) {
+		t.Fatalf("expected CURRICULUM VITAE < sidebar < PROFILE < page break, got cv=%d table=%d profile=%d break=%d", cvIdx, tblIdx, profIdx, brIdx)
 	}
 }
 

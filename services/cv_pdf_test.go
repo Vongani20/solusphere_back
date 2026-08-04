@@ -181,26 +181,19 @@ func TestGenerateCVWordMatchesTemplateBasics(t *testing.T) {
 		t.Fatal("expected a page break immediately before EXPERIENCE")
 	}
 
-	// The personal-details sidebar table must be pinned to the page so it
-	// always starts at the top, regardless of how much content it holds.
-	if !strings.Contains(xmlText, `w:vertAnchor="page" w:horzAnchor="page" w:tblpX="6751" w:tblpY="1021"`) {
-		t.Fatal("sidebar table should be page-anchored (personal details on top)")
+	// Page 1 uses a normal-flow two-column table (no floating anchors).
+	if strings.Contains(xmlText, "tblpPr") || strings.Contains(xmlText, `w:vertAnchor=`) {
+		t.Fatal("sidebar must not remain a floating table after page-1 layout")
 	}
-	if strings.Contains(xmlText, `w:vertAnchor="text"`) {
-		t.Fatal("sidebar table still uses text anchoring")
+	if !strings.Contains(xmlText, `<w:gridCol w:w="5600"/><w:gridCol w:w="4464"/>`) {
+		t.Fatal("expected fixed two-column page-1 grid")
 	}
 	if tblIdx := strings.Index(xmlText, "<w:tbl>"); tblIdx >= 0 {
 		nameIdx := strings.Index(xmlText, "CURRICULUM VITAE")
 		expBreakIdx := strings.Index(xmlText, `w:type="page"`)
-		// Master template keeps the floating sidebar before the left column.
 		if nameIdx >= 0 && expBreakIdx >= 0 && !(tblIdx < nameIdx && nameIdx < expBreakIdx) {
-			t.Fatalf("sidebar should stay before title in master template order (table=%d title=%d break=%d)", tblIdx, nameIdx, expBreakIdx)
+			t.Fatalf("page-1 table should contain title before the page break (table=%d title=%d break=%d)", tblIdx, nameIdx, expBreakIdx)
 		}
-	}
-
-	// Name/photo/PROFILE live in a page-anchored left float beside the sidebar.
-	if !strings.Contains(xmlText, `w:tblpX="851" w:tblpY="1100"`) {
-		t.Fatal("left column should be page-anchored on page 1")
 	}
 }
 

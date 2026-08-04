@@ -52,49 +52,51 @@ func TestGenerateCVWordKeepsProfileOnPage1(t *testing.T) {
 		t.Fatalf("PROFILE body must be on page 1 before EXPERIENCE page break (body=%d break=%d)", bodyIdx, breakIdx)
 	}
 
-	// Sidebar + left-column floats must both sit before the EXPERIENCE page break.
+	// Page 1 is a normal-flow two-column table: name/PROFILE | PERSONAL DETAILS.
 	tblIdx := strings.Index(xmlText, "<w:tbl>")
 	if tblIdx < 0 || tblIdx > breakIdx {
-		t.Fatalf("PERSONAL DETAILS sidebar must be before EXPERIENCE page break (table=%d break=%d)", tblIdx, breakIdx)
+		t.Fatalf("page-1 table must be before EXPERIENCE page break (table=%d break=%d)", tblIdx, breakIdx)
 	}
 	if !(tblIdx < nameIdx && nameIdx < profIdx && profIdx < breakIdx) {
-		t.Fatalf("expected sidebar(%d) < name(%d) < PROFILE(%d) < pageBreak(%d)", tblIdx, nameIdx, profIdx, breakIdx)
+		t.Fatalf("expected page1Table(%d) < name(%d) < PROFILE(%d) < pageBreak(%d)", tblIdx, nameIdx, profIdx, breakIdx)
 	}
 	if !strings.Contains(xmlText[:breakIdx], "PERSONAL") {
 		t.Fatal("expected PERSONAL DETAILS content before EXPERIENCE page break")
 	}
-	if !strings.Contains(xmlText, `w:tblpX="851" w:tblpY="1100"`) {
-		t.Fatal("expected page-1 left column floating table")
+	if strings.Contains(xmlText, "tblpPr") || strings.Contains(xmlText, `w:vertAnchor=`) {
+		t.Fatal("page-1 layout must not use floating table anchors")
 	}
-	if !strings.Contains(xmlText, `w:vertAnchor="page" w:horzAnchor="page" w:tblpX="6751" w:tblpY="1021"`) {
-		t.Fatal("expected page-1 sidebar floating table")
+	if !strings.Contains(xmlText, `<w:gridCol w:w="5600"/><w:gridCol w:w="4464"/>`) {
+		t.Fatal("expected fixed two-column page-1 grid")
 	}
 }
 
-func TestFloatCVPage1LeftColumn(t *testing.T) {
+func TestLayoutCVPage1SideBySide(t *testing.T) {
 	raw, err := cvMasterTemplateDocxBytes()
 	if err != nil {
 		t.Fatal(err)
 	}
-	doc := compactCVPage1LeftColumn(pinCVSidebarTable(string(raw)))
-	// Simulate filled name so CURRICULUM VITAE paragraph is still the anchor.
-	out := floatCVPage1LeftColumn(doc)
+	doc := compactCVPage1LeftColumn(string(raw))
+	out := layoutCVPage1SideBySide(doc)
 	if out == doc {
-		t.Fatal("expected left column to be wrapped in a floating table")
+		t.Fatal("expected page-1 side-by-side layout rewrite")
 	}
-	if !strings.Contains(out, `w:tblpX="851" w:tblpY="1100"`) {
-		t.Fatal("missing left-column page anchor")
+	if strings.Contains(out, "tblpPr") {
+		t.Fatal("side-by-side layout must strip floating tblpPr")
 	}
-	leftIdx := strings.Index(out, `w:tblpX="851"`)
 	nameIdx := strings.Index(out, "CURRICULUM VITAE")
 	profIdx := strings.Index(out, ">PROFILE<")
+	pdIdx := strings.Index(out, "Gender")
 	brIdx := strings.Index(out, `w:type="page"`)
-	if !(leftIdx < nameIdx && nameIdx < profIdx && profIdx < brIdx) {
-		t.Fatalf("expected left float to contain name/PROFILE before page break (left=%d name=%d profile=%d break=%d)", leftIdx, nameIdx, profIdx, brIdx)
+	if nameIdx < 0 || profIdx < 0 || pdIdx < 0 || brIdx < 0 {
+		t.Fatalf("missing markers name=%d profile=%d gender=%d break=%d", nameIdx, profIdx, pdIdx, brIdx)
+	}
+	if !(nameIdx < brIdx && profIdx < brIdx && pdIdx < brIdx) {
+		t.Fatalf("name/PROFILE/PERSONAL DETAILS must all be before page break")
 	}
 	var node struct{}
 	if err := xml.Unmarshal([]byte(out), &node); err != nil {
-		t.Fatalf("floated left column must keep well-formed XML: %v", err)
+		t.Fatalf("side-by-side document.xml must stay well-formed: %v", err)
 	}
 }
 

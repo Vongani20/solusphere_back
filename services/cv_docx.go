@@ -432,9 +432,24 @@ func clearCVSidebarTblBorders(tbl string) string {
 		return tbl
 	}
 	end := start + endRel + len("</w:tblBorders>")
-	return tbl[:start] +
+	tbl = tbl[:start] +
 		`<w:tblBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/></w:tblBorders>` +
+
 		tbl[end:]
+
+	// Some master-template sidebar sections use nested tables with tcBorders.
+	// Nilify any explicit "single" borders so we don't stack borders with the
+	// outer page-1 frame.
+	repl := []struct{ old, new string }{
+		{`w:top w:val="single"`, `w:top w:val="nil"`},
+		{`w:left w:val="single"`, `w:left w:val="nil"`},
+		{`w:bottom w:val="single"`, `w:bottom w:val="nil"`},
+		{`w:right w:val="single"`, `w:right w:val="nil"`},
+	}
+	for _, r := range repl {
+		tbl = strings.ReplaceAll(tbl, r.old, r.new)
+	}
+	return tbl
 }
 
 func replaceXMLAttr(xml, elem, attr, value string) string {

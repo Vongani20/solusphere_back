@@ -180,32 +180,22 @@ func ImportCVFromDocument(c *gin.Context) {
 		return
 	}
 
-	// OCR + structured parse for scanned/vectorized CVs can take several minutes.
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Minute)
+	// Keep under CloudFront origin timeout (60s). Single-shot vision import for
+	// scanned/vectorized PDFs avoids a second OpenAI round-trip.
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 55*time.Second)
 	defer cancel()
 
-	text, err := services.ExtractTextFromCVUploadContext(ctx, filename, data)
+	profile, warnings, err := services.ImportCVProfileFromUpload(ctx, filename, data)
 	if err != nil {
-		log.Printf("CV import text extraction failed for %q: %v", filename, err)
+		log.Printf("CV import failed for %q: %v", filename, err)
 		status := http.StatusBadRequest
+		msg := "Could not read text from document. Try another file or a clearer scan."
 		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
 			status = http.StatusGatewayTimeout
-		}
-		c.JSON(status, gin.H{
-			"error":   "Could not read text from document. Try another file or a clearer scan.",
-			"details": err.Error(),
-		})
-		return
-	}
-
-	profile, warnings, err := services.ParseCVFromDocumentText(ctx, text)
-	if err != nil {
-		log.Printf("CV import failed: %v", err)
-		status := http.StatusInternalServerError
-		msg := "Failed to parse CV document"
-		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-			status = http.StatusGatewayTimeout
-			msg = "CV import timed out while parsing. Please try again."
+			msg = "CV import timed out. Please try again, or use a text-based Word/PDF export."
+		} else if strings.Contains(strings.ToLower(err.Error()), "openai") || strings.Contains(strings.ToLower(err.Error()), "parse") {
+			status = http.StatusInternalServerError
+			msg = "Failed to parse CV document"
 		}
 		c.JSON(status, gin.H{"error": msg, "details": err.Error()})
 		return

@@ -2,9 +2,12 @@ package services
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"path/filepath"
 	"strings"
 
+	"solusphere_backend/internal/ai"
 	"solusphere_backend/models"
 )
 
@@ -43,6 +46,86 @@ Rules:
 - Do not summarize multiple jobs into one entry. Preserve company, position, period, and bullets per role.
 - Prefer completeness over brevity for experience, skills, qualifications, and every free-text field.`
 
+// ImportCVProfileFromUpload extracts a CV profile from an uploaded document.
+// Text-based files use native extract + JSON mapping. Scanned/vectorized PDFs
+// use a single vision call (page images → JSON) to stay within proxy timeouts.
+func ImportCVProfileFromUpload(ctx context.Context, filename string, data []byte) (*models.CVProfile, []string, error) {
+	if len(data) == 0 {
+		return nil, nil, fmt.Errorf("empty document")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	kind := detectCVDocumentKind(filename, data)
+	text, err := extractNativeCVText(kind, data)
+	if err == nil {
+		text = strings.TrimSpace(text)
+		if isUsefulCVText(text) {
+			return ParseCVFromDocumentText(ctx, text)
+		}
+	}
+
+	images, files, mediaErr := prepareCVImportMedia(ctx, filename, kind, data)
+	if mediaErr != nil {
+		return nil, nil, fmt.Errorf("no readable text found in document; %w", mediaErr)
+	}
+	if len(images) == 0 && len(files) == 0 {
+		return nil, nil, fmt.Errorf("no readable text found in document and OCR inputs were unavailable")
+	}
+
+	return ParseCVFromDocumentMedia(ctx, images, files)
+}
+
+func prepareCVImportMedia(ctx context.Context, filename, kind string, data []byte) ([]ai.ImageInput, []ai.FileInput, error) {
+	switch kind {
+	case "jpeg", "png", "gif", "webp":
+		mime := "image/" + kind
+		if kind == "jpeg" {
+			mime = "image/jpeg"
+		}
+		return []ai.ImageInput{{
+			ImageURL: fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(data)),
+			Detail:   "high",
+		}}, nil, nil
+	case "pdf":
+		pages, err := renderPDFPagesToImages(ctx, data, 6)
+		if err == nil && len(pages) > 0 {
+			return pages, nil, nil
+		}
+		imgs := extractPageLikeImagesFromPDF(data, 4)
+		var files []ai.FileInput
+		if len(imgs) == 0 && len(data) <= 8<<20 {
+			name := filenameBase(filename, "cv.pdf")
+			files = []ai.FileInput{{
+				Filename: name,
+				FileData: "data:application/pdf;base64," + base64.StdEncoding.EncodeToString(data),
+			}}
+		}
+		if len(imgs) == 0 && len(files) == 0 {
+			if err != nil {
+				return nil, nil, fmt.Errorf("PDF page rendering failed: %w", err)
+			}
+			return nil, nil, fmt.Errorf("PDF page rendering produced no images")
+		}
+		return imgs, files, nil
+	default:
+		name := filenameBase(filename, "document.bin")
+		return nil, []ai.FileInput{{
+			Filename: name,
+			FileData: fmt.Sprintf("data:%s;base64,%s", mimeForCVKind(kind), base64.StdEncoding.EncodeToString(data)),
+		}}, nil
+	}
+}
+
+func filenameBase(filename, fallback string) string {
+	name := filepath.Base(strings.TrimSpace(filename))
+	if name == "" || name == "." || name == string(filepath.Separator) {
+		return fallback
+	}
+	return name
+}
+
 // ParseCVFromDocumentText maps extracted document text into a CV profile draft.
 func ParseCVFromDocumentText(ctx context.Context, text string) (*models.CVProfile, []string, error) {
 	text = strings.TrimSpace(text)
@@ -55,7 +138,20 @@ func ParseCVFromDocumentText(ctx context.Context, text string) (*models.CVProfil
 	if err != nil {
 		return nil, nil, err
 	}
+	return profileFromImportPayload(payload, text)
+}
 
+// ParseCVFromDocumentMedia maps page images / attached files directly into a CV profile.
+func ParseCVFromDocumentMedia(ctx context.Context, images []ai.ImageInput, files []ai.FileInput) (*models.CVProfile, []string, error) {
+	userPrompt := "Read every attached CV page/image carefully and extract COMPLETE CV data as JSON. Do not skip later experience roles or scope bullets. Do not shorten any extracted text."
+	payload, err := GenerateStructuredJSONWithMedia(ctx, cvImportSystemPrompt, userPrompt, images, files, 16000)
+	if err != nil {
+		return nil, nil, err
+	}
+	return profileFromImportPayload(payload, "")
+}
+
+func profileFromImportPayload(payload map[string]interface{}, sourceText string) (*models.CVProfile, []string, error) {
 	profile := mapToCVProfile(payload)
 	models.SanitizeCVProfile(profile)
 
@@ -65,7 +161,7 @@ func ParseCVFromDocumentText(ctx context.Context, text string) (*models.CVProfil
 	}
 	if len(profile.Experience) == 0 {
 		warnings = append(warnings, "No experience entries were detected — add roles manually and check the source document.")
-	} else if len(profile.Experience) == 1 && strings.Count(strings.ToLower(text), "company") >= 2 {
+	} else if sourceText != "" && len(profile.Experience) == 1 && strings.Count(strings.ToLower(sourceText), "company") >= 2 {
 		warnings = append(warnings, "Only one experience entry was extracted. Review the Experience step — later roles may need to be added manually.")
 	}
 

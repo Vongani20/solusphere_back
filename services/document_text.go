@@ -338,8 +338,8 @@ func renderPDFPagesToImages(ctx context.Context, data []byte, maxPages int) ([]a
 
 	prefix := filepath.Join(dir, "page")
 	cmd := exec.CommandContext(ctx, "pdftoppm",
-		"-png",
-		"-r", "120",
+		"-jpeg",
+		"-r", "110",
 		"-f", "1",
 		"-l", strconv.Itoa(maxPages),
 		pdfPath,
@@ -355,9 +355,21 @@ func renderPDFPagesToImages(ctx context.Context, data []byte, maxPages int) ([]a
 		return nil, fmt.Errorf("pdftoppm failed: %s", msg)
 	}
 
-	matches, err := filepath.Glob(prefix + "-*.png")
+	matches, err := filepath.Glob(prefix + "-*.jpg")
 	if err != nil {
 		return nil, err
+	}
+	if len(matches) == 0 {
+		matches, err = filepath.Glob(prefix + "-*.jpeg")
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(matches) == 0 {
+		matches, err = filepath.Glob(prefix + "-*.png")
+		if err != nil {
+			return nil, err
+		}
 	}
 	sort.Strings(matches)
 	if len(matches) == 0 {
@@ -366,12 +378,16 @@ func renderPDFPagesToImages(ctx context.Context, data []byte, maxPages int) ([]a
 
 	out := make([]ai.ImageInput, 0, len(matches))
 	for _, path := range matches {
-		png, err := os.ReadFile(path)
-		if err != nil || len(png) < 1024 {
+		img, err := os.ReadFile(path)
+		if err != nil || len(img) < 1024 {
 			continue
 		}
+		mime := "image/jpeg"
+		if strings.HasSuffix(strings.ToLower(path), ".png") {
+			mime = "image/png"
+		}
 		out = append(out, ai.ImageInput{
-			ImageURL: "data:image/png;base64," + base64.StdEncoding.EncodeToString(png),
+			ImageURL: fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(img)),
 			Detail:   "high",
 		})
 	}

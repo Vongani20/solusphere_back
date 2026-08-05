@@ -399,6 +399,12 @@ func stripCVFloatingTableProps(tbl string) string {
 	tbl = strings.Replace(tbl, `<w:tblOverlap w:val="never"/>`, "", 1)
 	tbl = strings.Replace(tbl, `<w:tblOverlap w:val="overlap"/>`, "", 1)
 
+	// We draw the frame in the outer right cell (tcBorders). The master
+	// template also sets borders on the inner floating sidebar table, which
+	// causes a "double border" at the top/left edge of PERSONAL DETAILS.
+	// Clear tblBorders so only the outer cell border remains.
+	tbl = clearCVSidebarTblBorders(tbl)
+
 	// Nested sidebar must fit the page-1 right cell (4464 twips). The master
 	// template uses auto width ~4815, which clips content and can hide the left
 	// border against the cell edge.
@@ -414,6 +420,21 @@ func stripCVFloatingTableProps(tbl string) string {
 	tbl = strings.ReplaceAll(tbl, `w:tcW w:w="4140"`, `w:tcW w:w="`+strconv.Itoa(textW)+`"`)
 	tbl = strings.ReplaceAll(tbl, `w:tcW w:w="4815"`, `w:tcW w:w="`+strconv.Itoa(cellW)+`"`)
 	return tbl
+}
+
+func clearCVSidebarTblBorders(tbl string) string {
+	start := strings.Index(tbl, "<w:tblBorders>")
+	if start < 0 {
+		return tbl
+	}
+	endRel := strings.Index(tbl[start:], "</w:tblBorders>")
+	if endRel < 0 {
+		return tbl
+	}
+	end := start + endRel + len("</w:tblBorders>")
+	return tbl[:start] +
+		`<w:tblBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/></w:tblBorders>` +
+		tbl[end:]
 }
 
 func replaceXMLAttr(xml, elem, attr, value string) string {

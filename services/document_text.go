@@ -47,8 +47,16 @@ Rules:
 // Supports PDF (text + OCR fallback), Word (.docx/.doc), OpenDocument (.odt),
 // RTF, plain text, and common image formats (OCR).
 func ExtractTextFromCVUpload(filename string, data []byte) (string, error) {
+	return ExtractTextFromCVUploadContext(context.Background(), filename, data)
+}
+
+// ExtractTextFromCVUploadContext is ExtractTextFromCVUpload with a caller deadline.
+func ExtractTextFromCVUploadContext(ctx context.Context, filename string, data []byte) (string, error) {
 	if len(data) == 0 {
 		return "", fmt.Errorf("empty document")
+	}
+	if ctx == nil {
+		ctx = context.Background()
 	}
 
 	kind := detectCVDocumentKind(filename, data)
@@ -62,7 +70,7 @@ func ExtractTextFromCVUpload(filename string, data []byte) (string, error) {
 	}
 
 	nativeErr := err
-	ocrText, ocrErr := extractCVTextWithOCR(context.Background(), filename, kind, data)
+	ocrText, ocrErr := extractCVTextWithOCR(ctx, filename, kind, data)
 	if ocrErr == nil && isUsefulCVText(ocrText) {
 		return ocrText, nil
 	}
@@ -220,7 +228,7 @@ func extractCVTextWithOCR(ctx context.Context, filename, kind string, data []byt
 		return "", fmt.Errorf("OCR is unavailable because OpenAI is not configured")
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
 
 	req := ai.GenerateTextRequest{
@@ -250,15 +258,18 @@ func extractCVTextWithOCR(ctx context.Context, filename, kind string, data []byt
 		// pdftoppm is available so vision OCR can read the real content.
 		if pages, err := renderPDFPagesToImages(ctx, data, 6); err == nil && len(pages) > 0 {
 			req.Images = pages
-		} else if imgs := extractPageLikeImagesFromPDF(data, 4); len(imgs) > 0 {
-			req.Images = imgs
-		}
-		// Keep the PDF attachment as an additional signal when it is not huge.
-		if len(data) <= 8<<20 {
-			req.Files = []ai.FileInput{{
-				Filename: name,
-				FileData: "data:application/pdf;base64," + base64.StdEncoding.EncodeToString(data),
-			}}
+			// Skip attaching the full PDF when pages are rendered — the combined
+			// payload is slow/large and often exhausts the import timeout.
+		} else {
+			if imgs := extractPageLikeImagesFromPDF(data, 4); len(imgs) > 0 {
+				req.Images = imgs
+			}
+			if len(data) <= 8<<20 {
+				req.Files = []ai.FileInput{{
+					Filename: name,
+					FileData: "data:application/pdf;base64," + base64.StdEncoding.EncodeToString(data),
+				}}
+			}
 		}
 		if len(req.Images) == 0 && len(req.Files) == 0 {
 			return "", fmt.Errorf("PDF has no readable text and page rendering/OCR inputs were unavailable")
@@ -328,7 +339,7 @@ func renderPDFPagesToImages(ctx context.Context, data []byte, maxPages int) ([]a
 	prefix := filepath.Join(dir, "page")
 	cmd := exec.CommandContext(ctx, "pdftoppm",
 		"-png",
-		"-r", "150",
+		"-r", "120",
 		"-f", "1",
 		"-l", strconv.Itoa(maxPages),
 		pdfPath,

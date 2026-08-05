@@ -73,6 +73,14 @@ func TestGenerateCVWordKeepsProfileOnPage1(t *testing.T) {
 	if err != nil || !strings.Contains(xmlText[nameParaEnd-900:nameParaEnd], `w:right="0"`) {
 		t.Fatal("candidate-name paragraph must not retain the legacy sidebar right indent")
 	}
+	bodyParaStart := strings.LastIndex(xmlText[:bodyIdx], "<w:p")
+	bodyPara := xmlText[bodyParaStart:bodyIdx]
+	if strings.Contains(bodyPara, `w:right="4678"`) || strings.Contains(bodyPara, `w:right="4421"`) {
+		t.Fatal("PROFILE body must not retain legacy sidebar right indent")
+	}
+	if !strings.Contains(bodyPara, `w:right="0"`) && strings.Contains(bodyPara, `w:right="`) {
+		t.Fatal("PROFILE body right indent must be cleared for the page-1 cell")
+	}
 	leftStart := strings.Index(xmlText, `<w:tcW w:w="5600" w:type="dxa"/>`)
 	leftEnd := strings.Index(xmlText[leftStart:], "</w:tc>")
 	if leftStart < 0 || leftEnd < 0 || strings.Contains(xmlText[leftStart:leftStart+leftEnd], "<w:drawing>") {

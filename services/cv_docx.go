@@ -322,13 +322,28 @@ func layoutCVPage1SideBySide(doc string) string {
 }
 
 func normalizeCVPage1LeftColumnWidth(left string) string {
-	left = strings.ReplaceAll(left,
-		`<w:ind w:left="567" w:right="4421"/>`,
-		`<w:ind w:left="567" w:right="0"/>`)
-	// Some template paragraphs contain an equivalent left/right pair with
-	// extra attributes. The right indent is the cause of the collapsed text.
-	left = strings.ReplaceAll(left, ` w:right="4421"`, ` w:right="0"`)
-	return left
+	// The master template reserves the floating-sidebar width with large
+	// right indents (4421 on headings, 4678 on PROFILE body spacers). Inside a
+	// ~5600-twip table cell that leaves only a character of usable width, so
+	// PROFILE text stacks vertically. Zero every right indent in this cell.
+	var b strings.Builder
+	rest := left
+	for {
+		start := strings.Index(rest, ` w:right="`)
+		if start < 0 {
+			b.WriteString(rest)
+			break
+		}
+		end := strings.Index(rest[start+len(` w:right="`):], `"`)
+		if end < 0 {
+			b.WriteString(rest)
+			break
+		}
+		b.WriteString(rest[:start])
+		b.WriteString(` w:right="0"`)
+		rest = rest[start+len(` w:right="`)+end+1:]
+	}
+	return b.String()
 }
 
 func removeCVPage1DrawingParagraphs(content string) string {

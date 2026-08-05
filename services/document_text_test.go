@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
@@ -18,6 +19,31 @@ func TestNormalizeDocumentTextTrims(t *testing.T) {
 	if len([]rune(got)) != 60000 {
 		t.Fatalf("expected full document text without truncation, got %d runes", len([]rune(got)))
 	}
+}
+
+func TestExtractPageLikeImagesSkipsSmallLogos(t *testing.T) {
+	// Build a tiny fake PDF-ish blob with one small and one larger JPEG.
+	var buf bytes.Buffer
+	buf.WriteString("%PDF-1.7\n")
+	small := fakeJPEG(2 << 10)
+	large := fakeJPEG(100 << 10)
+	buf.Write(small)
+	buf.Write(large)
+
+	imgs := extractPageLikeImagesFromPDF(buf.Bytes(), 4)
+	if len(imgs) != 1 {
+		t.Fatalf("expected 1 page-like image, got %d", len(imgs))
+	}
+}
+
+func fakeJPEG(size int) []byte {
+	if size < 4 {
+		size = 4
+	}
+	b := make([]byte, size)
+	b[0], b[1], b[2] = 0xff, 0xd8, 0xff
+	b[size-2], b[size-1] = 0xff, 0xd9
+	return b
 }
 
 func TestParseJSONObjectStripsCodeFence(t *testing.T) {

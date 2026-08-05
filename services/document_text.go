@@ -8,8 +8,11 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -217,7 +220,7 @@ func extractCVTextWithOCR(ctx context.Context, filename, kind string, data []byt
 		return "", fmt.Errorf("OCR is unavailable because OpenAI is not configured")
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Minute)
 	defer cancel()
 
 	req := ai.GenerateTextRequest{
@@ -242,13 +245,23 @@ func extractCVTextWithOCR(ctx context.Context, filename, kind string, data []byt
 		if name == "" || name == "." {
 			name = "cv.pdf"
 		}
-		req.Files = []ai.FileInput{{
-			Filename: name,
-			FileData: "data:application/pdf;base64," + base64.StdEncoding.EncodeToString(data),
-		}}
-		// Also attach any embedded page images as a secondary signal.
-		if imgs := extractEmbeddedImagesFromPDF(data, 4); len(imgs) > 0 {
+		// Vectorized CVs (text drawn as outlines) have no extractable text and no
+		// useful embedded images — only logos/photos. Render pages to PNG when
+		// pdftoppm is available so vision OCR can read the real content.
+		if pages, err := renderPDFPagesToImages(ctx, data, 6); err == nil && len(pages) > 0 {
+			req.Images = pages
+		} else if imgs := extractPageLikeImagesFromPDF(data, 4); len(imgs) > 0 {
 			req.Images = imgs
+		}
+		// Keep the PDF attachment as an additional signal when it is not huge.
+		if len(data) <= 8<<20 {
+			req.Files = []ai.FileInput{{
+				Filename: name,
+				FileData: "data:application/pdf;base64," + base64.StdEncoding.EncodeToString(data),
+			}}
+		}
+		if len(req.Images) == 0 && len(req.Files) == 0 {
+			return "", fmt.Errorf("PDF has no readable text and page rendering/OCR inputs were unavailable")
 		}
 	default:
 		// For Word/unknown binaries, ask the model to OCR via file upload when possible.
@@ -291,10 +304,86 @@ func mimeForCVKind(kind string) string {
 	}
 }
 
+// renderPDFPagesToImages rasterizes PDF pages with pdftoppm (poppler-utils).
+// Returns nil, err when the tool is missing or rendering fails.
+func renderPDFPagesToImages(ctx context.Context, data []byte, maxPages int) ([]ai.ImageInput, error) {
+	if maxPages <= 0 {
+		maxPages = 6
+	}
+	if _, err := exec.LookPath("pdftoppm"); err != nil {
+		return nil, fmt.Errorf("pdftoppm not found: %w", err)
+	}
+
+	dir, err := os.MkdirTemp("", "cv-pdf-render-*")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(dir)
+
+	pdfPath := filepath.Join(dir, "input.pdf")
+	if err := os.WriteFile(pdfPath, data, 0o600); err != nil {
+		return nil, err
+	}
+
+	prefix := filepath.Join(dir, "page")
+	cmd := exec.CommandContext(ctx, "pdftoppm",
+		"-png",
+		"-r", "150",
+		"-f", "1",
+		"-l", strconv.Itoa(maxPages),
+		pdfPath,
+		prefix,
+	)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(stderr.String())
+		if msg == "" {
+			msg = err.Error()
+		}
+		return nil, fmt.Errorf("pdftoppm failed: %s", msg)
+	}
+
+	matches, err := filepath.Glob(prefix + "-*.png")
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(matches)
+	if len(matches) == 0 {
+		return nil, fmt.Errorf("pdftoppm produced no page images")
+	}
+
+	out := make([]ai.ImageInput, 0, len(matches))
+	for _, path := range matches {
+		png, err := os.ReadFile(path)
+		if err != nil || len(png) < 1024 {
+			continue
+		}
+		out = append(out, ai.ImageInput{
+			ImageURL: "data:image/png;base64," + base64.StdEncoding.EncodeToString(png),
+			Detail:   "high",
+		})
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("pdftoppm produced empty page images")
+	}
+	return out, nil
+}
+
+// extractPageLikeImagesFromPDF finds larger JPEG/PNG streams that look like
+// page scans. Decorative logos/photos are skipped so they do not dominate OCR.
+func extractPageLikeImagesFromPDF(data []byte, maxImages int) []ai.ImageInput {
+	return extractEmbeddedImagesFromPDF(data, maxImages, 80<<10)
+}
+
 // extractEmbeddedImagesFromPDF finds JPEG/PNG streams embedded in a PDF.
-func extractEmbeddedImagesFromPDF(data []byte, maxImages int) []ai.ImageInput {
+func extractEmbeddedImagesFromPDF(data []byte, maxImages int, minBytes ...int) []ai.ImageInput {
 	if maxImages <= 0 {
 		maxImages = 3
+	}
+	minSize := 8 << 10
+	if len(minBytes) > 0 && minBytes[0] > 0 {
+		minSize = minBytes[0]
 	}
 	out := make([]ai.ImageInput, 0, maxImages)
 
@@ -307,8 +396,8 @@ func extractEmbeddedImagesFromPDF(data []byte, maxImages int) []ai.ImageInput {
 			}
 			end = i + 2 + end + 2
 			chunk := data[i:end]
-			if len(chunk) < 8<<10 {
-				continue // skip tiny icons
+			if len(chunk) < minSize {
+				continue // skip tiny icons / logos
 			}
 			out = append(out, ai.ImageInput{
 				ImageURL: "data:image/jpeg;base64," + base64.StdEncoding.EncodeToString(chunk),
@@ -334,7 +423,7 @@ func extractEmbeddedImagesFromPDF(data []byte, maxImages int) []ai.ImageInput {
 			end = len(data)
 		}
 		chunk := data[i:end]
-		if len(chunk) < 8<<10 {
+		if len(chunk) < minSize {
 			continue
 		}
 		out = append(out, ai.ImageInput{

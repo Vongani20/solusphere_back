@@ -399,11 +399,8 @@ func stripCVFloatingTableProps(tbl string) string {
 	tbl = strings.Replace(tbl, `<w:tblOverlap w:val="never"/>`, "", 1)
 	tbl = strings.Replace(tbl, `<w:tblOverlap w:val="overlap"/>`, "", 1)
 
-	// We draw the frame in the outer right cell (tcBorders). The master
-	// template also sets borders on the inner floating sidebar table, which
-	// causes a "double border" at the top/left edge of PERSONAL DETAILS.
-	// Clear tblBorders so only the outer cell border remains.
-	tbl = clearCVSidebarTblBorders(tbl)
+	// Sidebar retains its own borders; the outer page-1 frame is disabled in
+	// cvPage1TwoColumnTable to avoid stacked borders.
 
 	// Nested sidebar must fit the page-1 right cell (4464 twips). The master
 	// template uses auto width ~4815, which clips content and can hide the left
@@ -480,7 +477,9 @@ func cvPage1TwoColumnTable(left, right string) string {
 	const total = 10064
 	const leftW = 5600
 	const rightW = total - leftW
-	const sideBorder = `<w:top w:val="single" w:sz="4" w:space="0" w:color="A6A6A6"/><w:left w:val="single" w:sz="4" w:space="0" w:color="A6A6A6"/><w:bottom w:val="single" w:sz="4" w:space="0" w:color="A6A6A6"/><w:right w:val="single" w:sz="4" w:space="0" w:color="A6A6A6"/>`
+	// Outer page-1 border disabled: the inner sidebar table provides the
+	// visible border around PERSONAL DETAILS.
+	const sideBorder = `<w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/>`
 	return `<w:tbl><w:tblPr>` +
 		`<w:tblW w:w="` + strconv.Itoa(total) + `" w:type="dxa"/>` +
 		`<w:tblLayout w:type="fixed"/>` +

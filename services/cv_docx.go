@@ -306,11 +306,10 @@ func layoutCVPage1SideBySide(doc string) string {
 	// leaves only a few characters of usable width, causing words to stack
 	// vertically. Remove that legacy reservation for the normal-flow cell.
 	leftInner = normalizeCVPage1LeftColumnWidth(leftInner)
-	// The template photo is a floating drawing with text wrapping. Once moved
-	// into a table cell it overlaps the PROFILE body and collapses it to a
-	// character-wide strip. Omit that incompatible floating drawing from the
-	// rebuilt page-one layout rather than allowing it to corrupt readable text.
-	leftInner = removeCVPage1DrawingParagraphs(leftInner)
+	// Keep the profile photo visible, but force top-and-bottom wrapping so it
+	// cannot squeeze PROFILE into a character-wide strip the way side-wrapping
+	// / behind-doc anchoring did inside the page-1 cell.
+	leftInner = prepareCVPage1Photo(leftInner)
 
 	bodyOpen := strings.Index(doc, "<w:body>")
 	if bodyOpen < 0 {
@@ -364,8 +363,27 @@ func removeCVPage1DrawingParagraphs(content string) string {
 	return out.String()
 }
 
+// prepareCVPage1Photo keeps the candidate photo in the left column but makes it
+// flow above PROFILE (wrapTopAndBottom) instead of overlapping or side-wrapping
+// text inside the page-1 table cell.
+func prepareCVPage1Photo(left string) string {
+	if !strings.Contains(left, "<w:drawing>") {
+		return left
+	}
+	left = strings.ReplaceAll(left, `<wp:wrapNone/>`, `<wp:wrapTopAndBottom/>`)
+	left = strings.ReplaceAll(left, `behindDoc="1"`, `behindDoc="0"`)
+	// Prefer paragraph-relative placement under the name rather than page pins.
+	left = strings.ReplaceAll(left,
+		`<wp:positionH relativeFrom="page">`,
+		`<wp:positionH relativeFrom="column">`)
+	left = strings.ReplaceAll(left,
+		`<wp:positionV relativeFrom="page">`,
+		`<wp:positionV relativeFrom="paragraph">`)
+	return left
+}
+
 // stripCVFloatingTableProps removes absolute positioning so the sidebar can sit
-// inside a normal-flow page-1 cell.
+// inside a normal-flow page-1 cell, and sizes it to the right-column width.
 func stripCVFloatingTableProps(tbl string) string {
 	for {
 		start := strings.Index(tbl, "<w:tblpPr")
@@ -380,7 +398,43 @@ func stripCVFloatingTableProps(tbl string) string {
 	}
 	tbl = strings.Replace(tbl, `<w:tblOverlap w:val="never"/>`, "", 1)
 	tbl = strings.Replace(tbl, `<w:tblOverlap w:val="overlap"/>`, "", 1)
+
+	// Nested sidebar must fit the page-1 right cell (4464 twips). The master
+	// template uses auto width ~4815, which clips content and can hide the left
+	// border against the cell edge.
+	const cellW = 4464
+	const iconW = 675
+	textW := cellW - iconW
+	tbl = replaceXMLAttr(tbl, "w:tblW", "w:w", strconv.Itoa(cellW))
+	tbl = strings.Replace(tbl, `<w:tblW w:w="0" w:type="auto"/>`,
+		`<w:tblW w:w="`+strconv.Itoa(cellW)+`" w:type="dxa"/>`, 1)
+	tbl = strings.Replace(tbl,
+		`<w:gridCol w:w="675"/><w:gridCol w:w="4140"/>`,
+		`<w:gridCol w:w="`+strconv.Itoa(iconW)+`"/><w:gridCol w:w="`+strconv.Itoa(textW)+`"/>`, 1)
+	tbl = strings.ReplaceAll(tbl, `w:tcW w:w="4140"`, `w:tcW w:w="`+strconv.Itoa(textW)+`"`)
+	tbl = strings.ReplaceAll(tbl, `w:tcW w:w="4815"`, `w:tcW w:w="`+strconv.Itoa(cellW)+`"`)
 	return tbl
+}
+
+func replaceXMLAttr(xml, elem, attr, value string) string {
+	// Best-effort single-element attribute rewrite for compact empty tags.
+	start := strings.Index(xml, "<"+elem)
+	if start < 0 {
+		return xml
+	}
+	end := strings.Index(xml[start:], "/>")
+	if end < 0 {
+		return xml
+	}
+	tag := xml[start : start+end+2]
+	key := attr + `="`
+	if i := strings.Index(tag, key); i >= 0 {
+		j := strings.Index(tag[i+len(key):], `"`)
+		if j >= 0 {
+			tag = tag[:i+len(key)] + value + tag[i+len(key)+j:]
+		}
+	}
+	return xml[:start] + tag + xml[start+end+2:]
 }
 
 // cvPage1TwoColumnTable places the left column and sidebar side-by-side in
@@ -390,6 +444,7 @@ func cvPage1TwoColumnTable(left, right string) string {
 	const total = 10064
 	const leftW = 5600
 	const rightW = total - leftW
+	const sideBorder = `<w:top w:val="single" w:sz="4" w:space="0" w:color="A6A6A6"/><w:left w:val="single" w:sz="4" w:space="0" w:color="A6A6A6"/><w:bottom w:val="single" w:sz="4" w:space="0" w:color="A6A6A6"/><w:right w:val="single" w:sz="4" w:space="0" w:color="A6A6A6"/>`
 	return `<w:tbl><w:tblPr>` +
 		`<w:tblW w:w="` + strconv.Itoa(total) + `" w:type="dxa"/>` +
 		`<w:tblLayout w:type="fixed"/>` +
@@ -404,10 +459,12 @@ func cvPage1TwoColumnTable(left, right string) string {
 		`<w:tcBorders>` +
 		`<w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/>` +
 		`</w:tcBorders></w:tcPr>` + left + `<w:p/>` + `</w:tc>` +
+		// Draw the sidebar frame on the outer right cell so the left edge stays
+		// visible even when Word collapses nested-table borders against the cell.
 		`<w:tc><w:tcPr><w:tcW w:w="` + strconv.Itoa(rightW) + `" w:type="dxa"/><w:vAlign w:val="top"/>` +
-		`<w:tcBorders>` +
-		`<w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/>` +
-		`</w:tcBorders></w:tcPr>` + right + `<w:p/>` + `</w:tc>` +
+		`<w:tcBorders>` + sideBorder + `</w:tcBorders>` +
+		`<w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/>` +
+		`</w:tcPr>` + right + `<w:p/>` + `</w:tc>` +
 		`</w:tr></w:tbl>`
 }
 

@@ -83,8 +83,19 @@ func TestGenerateCVWordKeepsProfileOnPage1(t *testing.T) {
 	}
 	leftStart := strings.Index(xmlText, `<w:tcW w:w="5600" w:type="dxa"/>`)
 	leftEnd := strings.Index(xmlText[leftStart:], "</w:tc>")
-	if leftStart < 0 || leftEnd < 0 || strings.Contains(xmlText[leftStart:leftStart+leftEnd], "<w:drawing>") {
-		t.Fatal("page-one left cell must not contain the incompatible floating photo drawing")
+	if leftStart < 0 || leftEnd < 0 {
+		t.Fatal("expected page-one left cell")
+	}
+	leftCell := xmlText[leftStart : leftStart+leftEnd]
+	if !strings.Contains(leftCell, "<w:drawing>") {
+		t.Fatal("page-one left cell must keep the profile photo")
+	}
+	if !strings.Contains(leftCell, "<wp:wrapTopAndBottom/>") {
+		t.Fatal("profile photo must use top-and-bottom wrap so PROFILE text stays readable")
+	}
+	rightStart := strings.Index(xmlText, `<w:tcW w:w="4464" w:type="dxa"/>`)
+	if rightStart < 0 || !strings.Contains(xmlText[rightStart:rightStart+500], `w:left w:val="single"`) {
+		t.Fatal("sidebar cell must keep a visible left border")
 	}
 }
 
@@ -113,8 +124,15 @@ func TestLayoutCVPage1SideBySide(t *testing.T) {
 	}
 	leftStart := strings.Index(out, `<w:tcW w:w="5600" w:type="dxa"/>`)
 	leftEnd := strings.Index(out[leftStart:], "</w:tc>")
-	if leftStart < 0 || leftEnd < 0 || strings.Contains(out[leftStart:leftStart+leftEnd], "<w:drawing>") {
-		t.Fatal("side-by-side left cell must remove the floating photo drawing")
+	if leftStart < 0 || leftEnd < 0 {
+		t.Fatal("expected side-by-side left cell")
+	}
+	leftCell := out[leftStart : leftStart+leftEnd]
+	if !strings.Contains(leftCell, "<w:drawing>") {
+		t.Fatal("side-by-side left cell must keep the profile photo")
+	}
+	if !strings.Contains(leftCell, "<wp:wrapTopAndBottom/>") {
+		t.Fatal("side-by-side photo must use top-and-bottom wrap")
 	}
 	var node struct{}
 	if err := xml.Unmarshal([]byte(out), &node); err != nil {

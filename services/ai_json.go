@@ -56,12 +56,71 @@ func parseJSONObject(raw string) (map[string]interface{}, error) {
 	raw = strings.TrimPrefix(raw, "```")
 	raw = strings.TrimSuffix(raw, "```")
 	raw = strings.TrimSpace(raw)
+	if idx := strings.Index(raw, "{"); idx > 0 {
+		raw = raw[idx:]
+	}
 
 	var result map[string]interface{}
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
-		return nil, fmt.Errorf("failed to parse JSON response: %w", err)
+	if err := json.Unmarshal([]byte(raw), &result); err == nil {
+		return result, nil
+	}
+
+	repaired := repairTruncatedJSON(raw)
+	if err := json.Unmarshal([]byte(repaired), &result); err != nil {
+		preview := raw
+		if len(preview) > 240 {
+			preview = preview[:240]
+		}
+		return nil, fmt.Errorf("failed to parse JSON response: %w (%q)", err, preview)
 	}
 	return result, nil
+}
+
+func repairTruncatedJSON(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.Index(s, "{"); i >= 0 {
+		s = s[i:]
+	}
+	inString := false
+	escaped := false
+	stack := make([]byte, 0, 8)
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if inString {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if c == '\\' {
+				escaped = true
+				continue
+			}
+			if c == '"' {
+				inString = false
+			}
+			continue
+		}
+		switch c {
+		case '"':
+			inString = true
+		case '{':
+			stack = append(stack, '}')
+		case '[':
+			stack = append(stack, ']')
+		case '}', ']':
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
+			}
+		}
+	}
+	if inString {
+		s += `"`
+	}
+	s = strings.TrimRight(s, ", \t\n\r")
+	for i := len(stack) - 1; i >= 0; i-- {
+		s += string(stack[i])
+	}
+	return s
 }
 
 func confidenceFromResult(result map[string]interface{}, fallback float64) float64 {

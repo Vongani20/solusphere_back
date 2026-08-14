@@ -44,13 +44,14 @@ Rules:
 - CRITICAL: Extract EVERY work experience / role in the document, not just the first one.
 - For each role, include ALL scope-of-work / responsibility / achievement bullets as separate strings. Do not truncate lists.
 - Do not summarize multiple jobs into one entry. Preserve company, position, period, and bullets per role.
-- Prefer completeness over brevity for experience, skills, qualifications, and every free-text field.`
+- Prefer completeness over brevity for experience, skills, qualifications, and every free-text field.
+- Return a single JSON object only. No markdown, no commentary.`
 
 // cvImportFastModel is a vision-capable model that finishes inside CloudFront's
 // 60s origin timeout. Production default (gpt-5.4) is too slow for page OCR.
 const cvImportFastModel = "gpt-4.1-mini"
 const cvImportMaxPages = 4
-const cvImportMaxTokens = 4000
+const cvImportMaxTokens = 12000
 
 // ImportCVProfileFromUpload extracts a CV profile from an uploaded document.
 // Text-based files use native extract + JSON mapping. Scanned/vectorized PDFs
@@ -139,7 +140,7 @@ func ParseCVFromDocumentText(ctx context.Context, text string) (*models.CVProfil
 		return nil, nil, fmt.Errorf("document contains no readable text")
 	}
 
-	userPrompt := "Extract COMPLETE CV data from this entire document. Do not skip later experience roles or scope bullets. Do not shorten any extracted text.\n\n" + text
+	userPrompt := "Extract COMPLETE CV data from this entire document. Do not skip later experience roles or scope bullets. Return one compact JSON object only — no markdown fences.\n\n" + text
 	payload, err := GenerateStructuredJSONWithMedia(ctx, cvImportSystemPrompt, userPrompt, nil, nil, cvImportMaxTokens, cvImportFastModel)
 	if err != nil {
 		return nil, nil, err
@@ -149,7 +150,7 @@ func ParseCVFromDocumentText(ctx context.Context, text string) (*models.CVProfil
 
 // ParseCVFromDocumentMedia maps page images / attached files directly into a CV profile.
 func ParseCVFromDocumentMedia(ctx context.Context, images []ai.ImageInput, files []ai.FileInput) (*models.CVProfile, []string, error) {
-	userPrompt := "Read every attached CV page/image carefully and extract COMPLETE CV data as JSON. Do not skip later experience roles or scope bullets. Do not shorten any extracted text."
+	userPrompt := "Read every attached CV page/image carefully and extract COMPLETE CV data as one compact JSON object. No markdown fences. Do not skip later experience roles or scope bullets."
 	payload, err := GenerateStructuredJSONWithMedia(ctx, cvImportSystemPrompt, userPrompt, images, files, cvImportMaxTokens, cvImportFastModel)
 	if err != nil {
 		return nil, nil, err

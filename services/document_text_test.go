@@ -60,6 +60,21 @@ func TestParseJSONObjectStripsCodeFence(t *testing.T) {
 	}
 }
 
+func TestParseJSONObjectRepairsTruncation(t *testing.T) {
+	raw := `{"first_name":"Rozelna","last_name":"Bosch","experience":[{"company":"CBRE"`
+	got, err := parseJSONObject(raw)
+	if err != nil {
+		t.Fatalf("parseJSONObject() error = %v", err)
+	}
+	if got["first_name"] != "Rozelna" {
+		t.Fatalf("first_name = %v", got["first_name"])
+	}
+	exp, ok := got["experience"].([]interface{})
+	if !ok || len(exp) != 1 {
+		t.Fatalf("experience = %v", got["experience"])
+	}
+}
+
 func TestBuildBPOAnalysisResultUsesPayload(t *testing.T) {
 	payload := map[string]interface{}{
 		"document_type":    "invoice",

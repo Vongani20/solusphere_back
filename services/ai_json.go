@@ -12,11 +12,11 @@ import (
 
 // GenerateStructuredJSON asks OpenAI for JSON-only output and parses it into a map.
 func GenerateStructuredJSON(ctx context.Context, systemPrompt, userPrompt string, maxTokens int) (map[string]interface{}, error) {
-	return GenerateStructuredJSONWithMedia(ctx, systemPrompt, userPrompt, nil, nil, maxTokens)
+	return GenerateStructuredJSONWithMedia(ctx, systemPrompt, userPrompt, nil, nil, maxTokens, "")
 }
 
 // GenerateStructuredJSONWithMedia is GenerateStructuredJSON with optional images/files.
-func GenerateStructuredJSONWithMedia(ctx context.Context, systemPrompt, userPrompt string, images []ai.ImageInput, files []ai.FileInput, maxTokens int) (map[string]interface{}, error) {
+func GenerateStructuredJSONWithMedia(ctx context.Context, systemPrompt, userPrompt string, images []ai.ImageInput, files []ai.FileInput, maxTokens int, model string) (map[string]interface{}, error) {
 	if !IsOpenAIInitialized() {
 		return nil, fmt.Errorf("OpenAI is not configured")
 	}
@@ -41,6 +41,7 @@ func GenerateStructuredJSONWithMedia(ctx context.Context, systemPrompt, userProm
 		Files:           files,
 		MaxOutputTokens: maxTokens,
 		Temperature:     0.1,
+		Model:           model,
 	})
 	if err != nil {
 		return nil, err

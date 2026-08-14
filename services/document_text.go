@@ -339,7 +339,8 @@ func renderPDFPagesToImages(ctx context.Context, data []byte, maxPages int) ([]a
 	prefix := filepath.Join(dir, "page")
 	cmd := exec.CommandContext(ctx, "pdftoppm",
 		"-jpeg",
-		"-r", "110",
+		"-jpegopt", "quality=65",
+		"-r", "90",
 		"-f", "1",
 		"-l", strconv.Itoa(maxPages),
 		pdfPath,
@@ -388,7 +389,7 @@ func renderPDFPagesToImages(ctx context.Context, data []byte, maxPages int) ([]a
 		}
 		out = append(out, ai.ImageInput{
 			ImageURL: fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(img)),
-			Detail:   "high",
+			Detail:   "auto",
 		})
 	}
 	if len(out) == 0 {

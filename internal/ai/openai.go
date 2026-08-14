@@ -46,6 +46,8 @@ type GenerateTextRequest struct {
 	MaxOutputTokens int
 	Temperature     float64
 	WebSearch       bool
+	// Model overrides the client default when set (e.g. a faster vision model).
+	Model string
 }
 
 type OpenAIClient struct {
@@ -184,8 +186,15 @@ func (c *OpenAIClient) GenerateTextResult(ctx context.Context, req GenerateTextR
 		maxTokens = 16
 	}
 
+	model := strings.TrimSpace(req.Model)
+	if model == "" {
+		model = c.model
+	} else {
+		model = NormalizeOpenAIModel(model)
+	}
+
 	payload := map[string]interface{}{
-		"model":             c.model,
+		"model":             model,
 		"input":             buildInput(req),
 		"max_output_tokens": maxTokens,
 	}
@@ -232,7 +241,7 @@ func (c *OpenAIClient) GenerateTextResult(ctx context.Context, req GenerateTextR
 	return GenerateTextResult{
 		Text:      text,
 		Citations: extractCitations(result),
-		Model:     c.model,
+		Model:     model,
 	}, nil
 }
 

@@ -533,6 +533,7 @@ func main() {
 			cv.DELETE("", handlers.DeleteCV)
 			cv.POST("/photo", handlers.UploadCVPhoto)
 			cv.POST("/import", handlers.ImportCVFromDocument)
+			cv.GET("/import/:job_id", handlers.GetCVImportJob)
 			cv.GET("/download", handlers.DownloadCVPDF)
 			cv.POST("/logs", handlers.CreateCVBuilderLog)
 			cv.GET("/search", handlers.SearchCVs)

@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -180,30 +179,51 @@ func ImportCVFromDocument(c *gin.Context) {
 		return
 	}
 
-	// Keep under CloudFront origin timeout (60s). Single-shot vision import for
-	// scanned/vectorized PDFs avoids a second OpenAI round-trip.
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 55*time.Second)
-	defer cancel()
+	// CloudFront origin timeout is 60s. Scanned/vectorized PDFs need longer
+	// for OpenAI vision, so import runs in the background and the client polls.
+	job := services.StartCVImportJob(userID, filename, data)
+	c.JSON(http.StatusAccepted, gin.H{
+		"job_id":  job.ID,
+		"status":  "processing",
+		"message": "Import started. Scanned PDFs can take up to a couple of minutes.",
+	})
+}
 
-	profile, warnings, err := services.ImportCVProfileFromUpload(ctx, filename, data)
-	if err != nil {
-		log.Printf("CV import failed for %q: %v", filename, err)
-		status := http.StatusBadRequest
-		msg := "Could not read text from document. Try another file or a clearer scan."
-		if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled) {
-			status = http.StatusGatewayTimeout
-			msg = "CV import timed out. Please try again, or use a text-based Word/PDF export."
-		} else if strings.Contains(strings.ToLower(err.Error()), "openai") || strings.Contains(strings.ToLower(err.Error()), "parse") {
-			status = http.StatusInternalServerError
-			msg = "Failed to parse CV document"
-		}
-		c.JSON(status, gin.H{"error": msg, "details": err.Error()})
+// GetCVImportJob returns the status of a background CV import.
+func GetCVImportJob(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
-
+	jobID := strings.TrimSpace(c.Param("job_id"))
+	if jobID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "job_id is required"})
+		return
+	}
+	job := services.GetCVImportJob(jobID, userID)
+	if job == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Import job not found"})
+		return
+	}
+	if job.Status == "processing" {
+		c.JSON(http.StatusOK, gin.H{"job_id": job.ID, "status": job.Status})
+		return
+	}
+	if job.Status == "error" {
+		c.JSON(http.StatusOK, gin.H{
+			"job_id":  job.ID,
+			"status":  job.Status,
+			"error":   "Could not import CV. Try PDF, Word, image scan, or another readable document.",
+			"details": job.Error,
+		})
+		return
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"cv":       profile,
-		"warnings": warnings,
+		"job_id":   job.ID,
+		"status":   job.Status,
+		"cv":       job.Profile,
+		"warnings": job.Warnings,
 		"message":  "CV imported. Review the form and save when ready.",
 	})
 }

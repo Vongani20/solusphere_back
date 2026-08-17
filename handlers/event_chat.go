@@ -33,6 +33,11 @@ type updateUserRequest struct {
 	PhoneNumber *string `json:"phone_number"`
 	Role        *string `json:"role"`
 	Password    *string `json:"password"`
+	IsDisabled  *bool   `json:"is_disabled"`
+}
+
+type setUserDisabledRequest struct {
+	IsDisabled bool `json:"is_disabled"`
 }
 
 type adminCreateUserRequest struct {
@@ -417,7 +422,68 @@ func UpdateUserByAdmin(c *gin.Context) {
 			return
 		}
 	}
+	if req.IsDisabled != nil {
+		if targetUserID == adminID && *req.IsDisabled {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Admins cannot disable their own account"})
+			return
+		}
+		user, err = models.SetUserDisabled(database.DB, targetUserID, *req.IsDisabled)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update account status"})
+			return
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{"message": "User updated", "user": adminUserResponse(user)})
+}
+
+// SetUserDisabledByAdmin enables or disables a user account.
+func SetUserDisabledByAdmin(c *gin.Context) {
+	adminID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+	if !requireAdmin(c, adminID) {
+		return
+	}
+
+	targetUserID, ok := parseUserIDParam(c)
+	if !ok {
+		return
+	}
+	if targetUserID == adminID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Admins cannot disable their own account"})
+		return
+	}
+
+	var req setUserDisabledRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request body. Expected {\"is_disabled\": true|false}"})
+		return
+	}
+
+	user, err := models.SetUserDisabled(database.DB, targetUserID, req.IsDisabled)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update account status"})
+		return
+	}
+
+	action := "enabled"
+	if req.IsDisabled {
+		action = "disabled"
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"message": "User " + action,
+		"user":    adminUserResponse(user),
+	})
 }
 
 func DeleteUserByAdmin(c *gin.Context) {
@@ -664,6 +730,7 @@ func adminUserResponse(user *models.User) gin.H {
 		"phone_number":  user.PhoneNumber,
 		"auth_provider": user.AuthProvider,
 		"role":          user.Role,
+		"is_disabled":   user.IsDisabled,
 		"created_at":    user.CreatedAt,
 	}
 }

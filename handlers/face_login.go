@@ -64,7 +64,7 @@ func FaceLogin(rekogSvc *services.RekognitionService) gin.HandlerFunc {
 		defer cancel()
 
 		query := `
-			SELECT u.id, u.username, u.email, u.role, uf.status, COALESCE(uf.image_url, ''), COALESCE(uf.face_id, '')
+			SELECT u.id, u.username, u.email, u.role, COALESCE(u.is_disabled, 0), uf.status, COALESCE(uf.image_url, ''), COALESCE(uf.face_id, '')
 			FROM users u
 			INNER JOIN user_faces uf ON uf.user_id = u.id
 			WHERE u.id = ?
@@ -92,17 +92,28 @@ func FaceLogin(rekogSvc *services.RekognitionService) gin.HandlerFunc {
 
 			var (
 				user         models.UserMinimal
+				isDisabled   bool
 				faceStatus   bool
 				imageURL     string
 				storedFaceID string
 			)
 			row := database.DB.QueryRowContext(ctx, query, userID)
-			if err := row.Scan(&user.ID, &user.Username, &user.Email, &user.Role, &faceStatus, &imageURL, &storedFaceID); err != nil {
+			if err := row.Scan(&user.ID, &user.Username, &user.Email, &user.Role, &isDisabled, &faceStatus, &imageURL, &storedFaceID); err != nil {
 				if err == sql.ErrNoRows {
 					log.Printf("⚠️ Face match belongs to missing or unregistered user ID %d", userID)
 					continue
 				}
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+				return
+			}
+
+			if isDisabled {
+				log.Printf("⚠️ Face match belongs to disabled user ID %d", userID)
+				recordFaceLoginFailure(c, "account disabled")
+				c.JSON(http.StatusForbidden, gin.H{
+					"error": "This account has been disabled. Contact an administrator.",
+					"code":  "ACCOUNT_DISABLED",
+				})
 				return
 			}
 

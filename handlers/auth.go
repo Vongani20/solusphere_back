@@ -137,6 +137,15 @@ func Login(c *gin.Context) {
 		return
 	}
 
+	if user.IsDisabled {
+		recordPasswordLoginFailure(c, email, user, "account disabled")
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "This account has been disabled. Contact an administrator.",
+			"code":  "ACCOUNT_DISABLED",
+		})
+		return
+	}
+
 	faceStatus, imageURL, err := models.GetUserFaceRegistrationStatus(database.DB, user.ID)
 	if err != nil {
 		log.Printf("Face status lookup error for user %d: %v", user.ID, err)
@@ -182,6 +191,10 @@ func ForgotPassword(c *gin.Context) {
 	email := strings.TrimSpace(strings.ToLower(req.Email))
 	user, err := models.GetUserByEmail(database.DB, email)
 	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "If this account can receive reset messages, a code has been sent."})
+		return
+	}
+	if user.IsDisabled {
 		c.JSON(http.StatusOK, gin.H{"message": "If this account can receive reset messages, a code has been sent."})
 		return
 	}

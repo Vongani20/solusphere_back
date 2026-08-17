@@ -437,6 +437,7 @@ func main() {
 	// Protected routes (require authentication)
 	protected := r.Group("/api")
 	protected.Use(middleware.AuthMiddleware())
+	protected.Use(middleware.RequireEnabledUser())
 	protected.Use(middleware.RequireCompletedFaceRegistration())
 	{
 		// User routes
@@ -489,6 +490,7 @@ func main() {
 			admin.POST("/users", handlers.CreateUserByAdmin)
 			admin.GET("/users/:user_id", handlers.GetUserByAdmin)
 			admin.PATCH("/users/:user_id", handlers.UpdateUserByAdmin)
+			admin.PATCH("/users/:user_id/disabled", handlers.SetUserDisabledByAdmin)
 			admin.DELETE("/users/:user_id", handlers.DeleteUserByAdmin)
 			admin.PATCH("/users/:user_id/role", handlers.UpdateUserRole)
 			admin.POST("/events", handlers.CreateEvent)

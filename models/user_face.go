@@ -57,20 +57,13 @@ func GetUserFaceRegistrationStatus(db *sql.DB, userID int) (bool, string, error)
 
 // GetUserByID retrieves a user by their ID
 func GetUserByID(db *sql.DB, userID int) (*User, error) {
-	query := "SELECT id, username, email, COALESCE(phone_number, ''), password, COALESCE(auth_provider, 'local'), role, created_at FROM users WHERE id = ?"
-	row := db.QueryRow(query, userID)
-
-	user := &User{}
-	err := row.Scan(&user.ID, &user.Username, &user.Email, &user.PhoneNumber, &user.Password, &user.AuthProvider, &user.Role, &user.CreatedAt)
-
+	row := db.QueryRow("SELECT "+userSelectColumns+" FROM users WHERE id = ?", userID)
+	user, err := scanUser(row)
 	if err == sql.ErrNoRows {
-		// Return nil explicitly if no record is found
 		return nil, nil
 	}
 	if err != nil {
-		// Return any other actual database error
 		return nil, err
 	}
-
 	return user, nil
 }

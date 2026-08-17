@@ -18,6 +18,7 @@ type User struct {
 	Password     string    `json:"-"`
 	AuthProvider string    `json:"auth_provider"`
 	Role         string    `json:"role"`
+	IsDisabled   bool      `json:"is_disabled"`
 	CreatedAt    time.Time `json:"created_at"`
 }
 
@@ -46,29 +47,44 @@ func (u *User) CheckPassword(password string) error {
 	return bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(password))
 }
 
-func GetUserByUsername(db *sql.DB, username string) (*User, error) {
-	query := "SELECT id, username, email, COALESCE(phone_number, ''), password, COALESCE(auth_provider, 'local'), role, created_at FROM users WHERE username = ?"
-	row := db.QueryRow(query, username)
+const userSelectColumns = `id, username, email, COALESCE(phone_number, ''), password, COALESCE(auth_provider, 'local'), role, COALESCE(is_disabled, 0), created_at`
 
+func scanUser(scanner interface {
+	Scan(dest ...any) error
+}) (*User, error) {
 	user := &User{}
-	err := row.Scan(&user.ID, &user.Username, &user.Email, &user.PhoneNumber, &user.Password, &user.AuthProvider, &user.Role, &user.CreatedAt)
+	err := scanner.Scan(
+		&user.ID,
+		&user.Username,
+		&user.Email,
+		&user.PhoneNumber,
+		&user.Password,
+		&user.AuthProvider,
+		&user.Role,
+		&user.IsDisabled,
+		&user.CreatedAt,
+	)
 	if err != nil {
 		return nil, err
 	}
+	return user, nil
+}
 
+func GetUserByUsername(db *sql.DB, username string) (*User, error) {
+	row := db.QueryRow("SELECT "+userSelectColumns+" FROM users WHERE username = ?", username)
+	user, err := scanUser(row)
+	if err != nil {
+		return nil, err
+	}
 	return user, nil
 }
 
 func GetUserByEmail(db *sql.DB, email string) (*User, error) {
-	query := "SELECT id, username, email, COALESCE(phone_number, ''), password, COALESCE(auth_provider, 'local'), role, created_at FROM users WHERE email = ?"
-	row := db.QueryRow(query, email)
-
-	user := &User{}
-	err := row.Scan(&user.ID, &user.Username, &user.Email, &user.PhoneNumber, &user.Password, &user.AuthProvider, &user.Role, &user.CreatedAt)
+	row := db.QueryRow("SELECT "+userSelectColumns+" FROM users WHERE email = ?", email)
+	user, err := scanUser(row)
 	if err != nil {
 		return nil, err
 	}
-
 	return user, nil
 }
 
@@ -121,7 +137,7 @@ func UpdateUserPassword(db *sql.DB, userID int, newPassword string) error {
 
 func ListUsers(db *sql.DB) ([]User, error) {
 	rows, err := db.Query(`
-		SELECT id, username, email, COALESCE(phone_number, ''), password, COALESCE(auth_provider, 'local'), role, created_at
+		SELECT ` + userSelectColumns + `
 		FROM users
 		ORDER BY created_at DESC, id DESC
 	`)
@@ -132,13 +148,37 @@ func ListUsers(db *sql.DB) ([]User, error) {
 
 	users := make([]User, 0)
 	for rows.Next() {
-		var user User
-		if err := rows.Scan(&user.ID, &user.Username, &user.Email, &user.PhoneNumber, &user.Password, &user.AuthProvider, &user.Role, &user.CreatedAt); err != nil {
+		user, err := scanUser(rows)
+		if err != nil {
 			return nil, err
 		}
-		users = append(users, user)
+		users = append(users, *user)
 	}
 	return users, rows.Err()
+}
+
+func SetUserDisabled(db *sql.DB, userID int, disabled bool) (*User, error) {
+	result, err := db.Exec(`UPDATE users SET is_disabled = ? WHERE id = ?`, disabled, userID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if rows == 0 {
+		return nil, sql.ErrNoRows
+	}
+	return GetUserByID(db, userID)
+}
+
+func IsUserDisabled(db *sql.DB, userID int) (bool, error) {
+	var disabled bool
+	err := db.QueryRow(`SELECT COALESCE(is_disabled, 0) FROM users WHERE id = ?`, userID).Scan(&disabled)
+	if err != nil {
+		return false, err
+	}
+	return disabled, nil
 }
 
 func UpdateUserProfile(db *sql.DB, userID int, username, email, phoneNumber, role string) (*User, error) {

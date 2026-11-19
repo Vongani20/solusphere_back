@@ -488,6 +488,20 @@ func main() {
 		protected.POST("/chats/:user_id/messages", handlers.SendDirectMessage)
 		protected.POST("/chats/:user_id/calls", handlers.StartCall)
 		protected.GET("/calls/ice-servers", handlers.GetCallICEServers)
+		protected.POST("/chats/messages/:message_id/reactions", handlers.ReactToDirectMessage)
+
+		// Group calls (mesh WebRTC, HTTP-polled signaling)
+		groupCalls := protected.Group("/group-calls")
+		{
+			groupCalls.POST("", handlers.StartGroupCall)
+			groupCalls.GET("/incoming", handlers.ListIncomingGroupCalls)
+			groupCalls.GET("/:call_id/sync", handlers.SyncGroupCall)
+			groupCalls.POST("/:call_id/join", handlers.JoinGroupCall)
+			groupCalls.POST("/:call_id/decline", handlers.DeclineGroupCall)
+			groupCalls.POST("/:call_id/leave", handlers.LeaveGroupCall)
+			groupCalls.POST("/:call_id/invite", handlers.InviteToGroupCall)
+			groupCalls.POST("/:call_id/signals", handlers.SendGroupCallSignal)
+		}
 
 		// Admin event chat routes
 		admin := protected.Group("/admin")

@@ -19,6 +19,7 @@ func EnsureChatAndCallSchema(db *sql.DB) error {
 		{name: "direct message attachments", fn: ensureDirectMessageAttachmentColumns},
 		{name: "call sessions", fn: ensureCallSessionTables},
 		{name: "user presence", fn: ensureUserPresenceTable},
+		{name: "rfp documents", fn: ensureRFPDocumentsTable},
 	}
 
 	for _, step := range steps {
@@ -113,6 +114,33 @@ func ensureUserPresenceTable(db *sql.DB) error {
 			last_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
 			INDEX idx_user_presence_last_seen (last_seen_at)
+		)
+	`)
+	return err
+}
+
+func ensureRFPDocumentsTable(db *sql.DB) error {
+	if tableExists(db, "rfp_documents") {
+		return nil
+	}
+
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS rfp_documents (
+			id CHAR(36) PRIMARY KEY,
+			user_id INT NOT NULL,
+			original_filename VARCHAR(1024) NOT NULL DEFAULT '',
+			sources_json LONGTEXT NULL,
+			extracted_text LONGTEXT NULL,
+			analysis_source VARCHAR(20) NOT NULL DEFAULT 'builtin',
+			model VARCHAR(100) NULL,
+			truncated TINYINT(1) NOT NULL DEFAULT 0,
+			warning TEXT NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'processing',
+			template_json LONGTEXT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			INDEX idx_rfp_documents_user_created (user_id, created_at)
 		)
 	`)
 	return err

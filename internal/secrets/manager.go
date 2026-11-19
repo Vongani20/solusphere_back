@@ -32,6 +32,13 @@ type AppSecrets struct {
 	SMTPUsername  string `json:"SMTP_USERNAME"`
 	SMTPPassword  string `json:"SMTP_PASSWORD"`
 	SMTPFrom      string `json:"SMTP_FROM"`
+	// WebRTC TURN relay used by voice/video calls. TURN_URLS is comma-separated.
+	// Use TURN_SECRET for coturn "use-auth-secret" (time-limited credentials),
+	// or TURN_USERNAME/TURN_CREDENTIAL for a static account.
+	TURNURLs       string `json:"TURN_URLS"`
+	TURNUsername   string `json:"TURN_USERNAME"`
+	TURNCredential string `json:"TURN_CREDENTIAL"`
+	TURNSecret     string `json:"TURN_SECRET"`
 }
 
 var (

@@ -597,6 +597,10 @@ func main() {
 		if appSecrets.AWSRegion != "" && appSecrets.AWSBucketName != "" {
 			awsStatus = "configured"
 		}
+		turnStatus := "not_configured"
+		if os.Getenv("TURN_URLS") != "" && (os.Getenv("TURN_SECRET") != "" || os.Getenv("TURN_CREDENTIAL") != "") {
+			turnStatus = "configured"
+		}
 		openAIStatus := "not_configured"
 		if services.IsOpenAIInitialized() {
 			openAIStatus = "configured"
@@ -611,6 +615,7 @@ func main() {
 			"database_name":  appSecrets.DBName,
 			"aws_status":     awsStatus,
 			"openai_status":  openAIStatus,
+			"turn_status":    turnStatus,
 			"openai_model":   services.GetOpenAIModel(),
 			"secrets_source": getSecretsSource(useAWSSecrets, useSecretsAgent),
 			"secret_name":    os.Getenv("AWS_SECRET_NAME"),

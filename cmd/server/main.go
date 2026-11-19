@@ -119,6 +119,12 @@ func main() {
 		secretsManager.StartRefreshTicker(ctx, 15*time.Minute)
 		log.Println(" Secret auto-refresh enabled (every 15 minutes)")
 
+		// TURN relay settings for calls; env vars set on the task take precedence.
+		setEnvIfEmpty("TURN_URLS", appSecretsRaw.TURNURLs)
+		setEnvIfEmpty("TURN_USERNAME", appSecretsRaw.TURNUsername)
+		setEnvIfEmpty("TURN_CREDENTIAL", appSecretsRaw.TURNCredential)
+		setEnvIfEmpty("TURN_SECRET", appSecretsRaw.TURNSecret)
+
 		// Convert to AppSecrets
 		appSecrets = &AppSecrets{
 			JWTSecret:     appSecretsRaw.JWTSecret,
@@ -481,6 +487,7 @@ func main() {
 		protected.GET("/chats/:user_id/messages", handlers.ListDirectMessages)
 		protected.POST("/chats/:user_id/messages", handlers.SendDirectMessage)
 		protected.POST("/chats/:user_id/calls", handlers.StartCall)
+		protected.GET("/calls/ice-servers", handlers.GetCallICEServers)
 
 		// Admin event chat routes
 		admin := protected.Group("/admin")
@@ -539,6 +546,19 @@ func main() {
 			cv.GET("/download", handlers.DownloadCVPDF)
 			cv.POST("/logs", handlers.CreateCVBuilderLog)
 			cv.GET("/search", handlers.SearchCVs)
+		}
+
+		// RFP template builder routes
+		rfp := protected.Group("/rfp")
+		{
+			rfp.GET("/documents", handlers.ListRFPDocuments)
+			rfp.POST("/documents", handlers.CreateRFPDocument)
+			rfp.GET("/documents/:id", handlers.GetRFPDocument)
+			rfp.PUT("/documents/:id", handlers.UpdateRFPDocument)
+			rfp.DELETE("/documents/:id", handlers.DeleteRFPDocument)
+			rfp.POST("/documents/:id/sources", handlers.AddRFPSources)
+			rfp.POST("/documents/:id/reanalyze", handlers.ReanalyzeRFPDocument)
+			rfp.GET("/documents/:id/download", handlers.DownloadRFPDocument)
 		}
 
 		// Admin CV routes
@@ -703,4 +723,10 @@ func configuredLabel(value string) string {
 		return "(not set)"
 	}
 	return "(set)"
+}
+
+func setEnvIfEmpty(key, value string) {
+	if value != "" && os.Getenv(key) == "" {
+		os.Setenv(key, value)
+	}
 }

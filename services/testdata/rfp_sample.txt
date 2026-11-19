@@ -1,0 +1,77 @@
+CITY OF HARBORVIEW
+Procurement Office
+Request for Proposal
+
+RFP No: HV-2026-114
+Issued: 2 March 2026
+Closing date: 18 April 2026, 14:00 local time
+
+Issued by: City of Harborview, Procurement Office
+Contact: Amara Ndlovu, Procurement Lead
+Email: procurement@harborview.gov
+Phone: +27 21 555 0142
+
+1. Purpose
+The City of Harborview invites qualified suppliers to submit proposals for a municipal service-request platform. The platform will let residents report issues, let departments assign work, and give managers a live view of open requests.
+
+2. Background
+Residents currently report problems by phone, email, and a paper form at the civic centre. Those reports are retyped into three separate spreadsheets. The city wants one system that records the request once, routes it to the right department, and shows status to the resident.
+
+3. Objectives
+- Replace the paper and spreadsheet intake process by 1 September 2026.
+- Give every department a shared queue with assignment and due dates.
+- Publish a public status page that does not expose personal data.
+- Keep a full audit trail of status changes for five years.
+
+4. Scope of work
+The supplier shall design, configure, and deploy the platform, migrate open records from the current spreadsheets, train city staff, and support the system for twelve months after go-live.
+The work includes a resident web form, a staff console, email notifications, and a weekly management report.
+The supplier must host the production system in a region approved by the city, with daily backups.
+
+5. Deliverables
+- A configured production platform and a staging environment.
+- Data migration of open service requests from the three existing spreadsheets.
+- Role-based accounts for at least eight departments.
+- Admin, agent, and resident user guides.
+- Two on-site training sessions of three hours each.
+- A twelve-month support plan with a named support contact.
+
+6. Mandatory requirements
+- The solution must run in a current browser without a desktop install for residents.
+- The supplier shall provide single sign-on for city staff using the city's existing identity provider.
+- All personal data must be encrypted in transit and at rest.
+- The system must record who changed a request status and when.
+- The supplier must be able to start configuration within 15 business days of award.
+- Proposals must include at least two references for similar public-sector work completed in the last four years.
+
+7. Eligibility
+Bidders must be registered legal entities, must hold valid tax clearance at the time of submission, and must not be barred from public procurement. Joint ventures are allowed if one partner is identified as the lead.
+
+8. Evaluation criteria
+- Technical approach and delivery plan: 40%
+- Relevant experience and references: 25%
+- Team and support model: 15%
+- Price: 20%
+A proposal that misses a mandatory requirement will not be scored.
+
+9. Timeline
+- Clarification questions due: 20 March 2026
+- Responses to questions published: 27 March 2026
+- Proposal closing: 18 April 2026, 14:00
+- Evaluation complete: 15 May 2026
+- Intended award: 29 May 2026
+- Target go-live: 1 September 2026
+
+10. Submission instructions
+Submit one PDF proposal by email to procurement@harborview.gov with the subject line HV-2026-114 Proposal. The file must be under 20 MB. Late submissions will not be opened.
+The proposal format is: company profile, technical approach, delivery schedule, team, references, support plan, and a separate price schedule.
+
+11. Required documents
+- Completed proposal in the format above.
+- Tax clearance certificate.
+- Two reference letters.
+- Price schedule as a separate file.
+- Signed declaration that the bidder is not barred from public procurement.
+
+12. Terms
+The city may cancel this RFP at any time before award. Prices must be fixed for 90 days from the closing date. The selected supplier will be required to sign the city's standard services agreement. Intellectual property in city data remains with the city.

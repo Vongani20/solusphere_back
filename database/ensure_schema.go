@@ -21,6 +21,7 @@ func EnsureChatAndCallSchema(db *sql.DB) error {
 		{name: "user presence", fn: ensureUserPresenceTable},
 		{name: "innovation ideas", fn: ensureInnovationIdeasTable},
 		{name: "cv builder logs", fn: ensureCVBuilderLogsTable},
+		{name: "rfp documents", fn: ensureRFPDocumentsTable},
 	}
 
 	for _, step := range steps {
@@ -179,6 +180,33 @@ func ensureCVBuilderLogsTable(db *sql.DB) error {
 			INDEX idx_cv_builder_logs_user_id (user_id),
 			INDEX idx_cv_builder_logs_action (action),
 			INDEX idx_cv_builder_logs_created_at (created_at)
+		)
+	`)
+	return err
+}
+
+func ensureRFPDocumentsTable(db *sql.DB) error {
+	if tableExists(db, "rfp_documents") {
+		return nil
+	}
+
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS rfp_documents (
+			id CHAR(36) PRIMARY KEY,
+			user_id INT NOT NULL,
+			original_filename VARCHAR(1024) NOT NULL DEFAULT '',
+			sources_json LONGTEXT NULL,
+			extracted_text LONGTEXT NULL,
+			analysis_source VARCHAR(20) NOT NULL DEFAULT 'builtin',
+			model VARCHAR(100) NULL,
+			truncated TINYINT(1) NOT NULL DEFAULT 0,
+			warning TEXT NULL,
+			status VARCHAR(20) NOT NULL DEFAULT 'processing',
+			template_json LONGTEXT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+			INDEX idx_rfp_documents_user_created (user_id, created_at)
 		)
 	`)
 	return err

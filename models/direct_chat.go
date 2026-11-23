@@ -22,17 +22,18 @@ type ChatUser struct {
 }
 
 type DirectMessage struct {
-	ID               int        `json:"id"`
-	SenderID         int        `json:"sender_id"`
-	SenderUsername   string     `json:"sender_username"`
-	ReceiverID       int        `json:"receiver_id"`
-	ReceiverUsername string     `json:"receiver_username"`
-	Message          string     `json:"message"`
-	MessageType      string     `json:"message_type"`
-	AttachmentURL    string     `json:"attachment_url,omitempty"`
-	AttachmentMIME   string     `json:"attachment_mime,omitempty"`
-	ReadAt           *time.Time `json:"read_at"`
-	CreatedAt        time.Time  `json:"created_at"`
+	ID               int               `json:"id"`
+	SenderID         int               `json:"sender_id"`
+	SenderUsername   string            `json:"sender_username"`
+	ReceiverID       int               `json:"receiver_id"`
+	ReceiverUsername string            `json:"receiver_username"`
+	Message          string            `json:"message"`
+	MessageType      string            `json:"message_type"`
+	AttachmentURL    string            `json:"attachment_url,omitempty"`
+	AttachmentMIME   string            `json:"attachment_mime,omitempty"`
+	ReadAt           *time.Time        `json:"read_at"`
+	CreatedAt        time.Time         `json:"created_at"`
+	Reactions        []MessageReaction `json:"reactions"`
 }
 
 type DirectConversation struct {
@@ -65,7 +66,7 @@ func directMessageSelectColumns() string {
 func scanDirectMessage(scanner interface {
 	Scan(dest ...any) error
 }) (*DirectMessage, error) {
-	message := &DirectMessage{}
+	message := &DirectMessage{Reactions: []MessageReaction{}}
 	if err := scanner.Scan(
 		&message.ID,
 		&message.SenderID,
@@ -190,6 +191,9 @@ func ListDirectMessages(db *sql.DB, currentUserID, otherUserID, limit int) ([]Di
 		messages = append(messages, *message)
 	}
 	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := attachMessageReactions(db, messages); err != nil {
 		return nil, err
 	}
 

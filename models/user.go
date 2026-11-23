@@ -10,7 +10,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
-const userSelectColumns = `id, username, email, COALESCE(phone_number, ''), password, COALESCE(auth_provider, 'local'), role, birth_date, created_at`
+const userSelectColumns = `id, username, email, COALESCE(phone_number, ''), password, COALESCE(auth_provider, 'local'), role, birth_date, COALESCE(is_disabled, 0), created_at`
 
 type User struct {
 	ID           int       `json:"id"`
@@ -21,6 +21,7 @@ type User struct {
 	AuthProvider string    `json:"auth_provider"`
 	Role         string    `json:"role"`
 	BirthDate    string    `json:"birth_date,omitempty"`
+	IsDisabled   bool      `json:"is_disabled"`
 	CreatedAt    time.Time `json:"created_at"`
 }
 
@@ -62,6 +63,7 @@ func scanUser(row interface{ Scan(...any) error }) (*User, error) {
 		&user.AuthProvider,
 		&user.Role,
 		&birth,
+		&user.IsDisabled,
 		&user.CreatedAt,
 	)
 	if err != nil {
@@ -163,6 +165,30 @@ func SetUserBirthDate(db *sql.DB, userID int, birthDate string) (*User, error) {
 		return nil, err
 	}
 	return GetUserByID(db, userID)
+}
+
+func SetUserDisabled(db *sql.DB, userID int, disabled bool) (*User, error) {
+	result, err := db.Exec(`UPDATE users SET is_disabled = ? WHERE id = ?`, disabled, userID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if rows == 0 {
+		return nil, sql.ErrNoRows
+	}
+	return GetUserByID(db, userID)
+}
+
+func IsUserDisabled(db *sql.DB, userID int) (bool, error) {
+	var disabled bool
+	err := db.QueryRow(`SELECT COALESCE(is_disabled, 0) FROM users WHERE id = ?`, userID).Scan(&disabled)
+	if err != nil {
+		return false, err
+	}
+	return disabled, nil
 }
 
 func UpdateUserProfile(db *sql.DB, userID int, username, email, phoneNumber, role string) (*User, error) {

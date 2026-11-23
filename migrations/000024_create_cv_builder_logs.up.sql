@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS cv_builder_logs (
+    id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id INT NOT NULL,
+    email VARCHAR(255) NULL,
+    username VARCHAR(255) NULL,
+    action VARCHAR(40) NOT NULL,
+    from_step INT NULL,
+    to_step INT NULL,
+    from_label VARCHAR(100) NULL,
+    to_label VARCHAR(100) NULL,
+    format VARCHAR(20) NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'clicked',
+    detail VARCHAR(500) NULL,
+    ip_address VARCHAR(64) NULL,
+    user_agent VARCHAR(500) NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    INDEX idx_cv_builder_logs_user_id (user_id),
+    INDEX idx_cv_builder_logs_action (action),
+    INDEX idx_cv_builder_logs_created_at (created_at)
+);

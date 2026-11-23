@@ -1,11 +1,12 @@
 package services
 
 import (
+	"bytes"
 	"strings"
 	"testing"
 )
 
-func TestNormalizeDocumentTextTrimsAndLimits(t *testing.T) {
+func TestNormalizeDocumentTextTrims(t *testing.T) {
 	input := "  Hello   world  \n\nSecond line  "
 	got := normalizeDocumentText(input)
 	want := "Hello   world  \n\nSecond line"
@@ -13,11 +14,36 @@ func TestNormalizeDocumentTextTrimsAndLimits(t *testing.T) {
 		t.Fatalf("normalizeDocumentText() = %q, want %q", got, want)
 	}
 
-	long := strings.Repeat("a", maxDocumentTextRunes+100)
+	long := strings.Repeat("a", 60000)
 	got = normalizeDocumentText(long)
-	if len([]rune(got)) != maxDocumentTextRunes {
-		t.Fatalf("expected %d runes, got %d", maxDocumentTextRunes, len([]rune(got)))
+	if len([]rune(got)) != 60000 {
+		t.Fatalf("expected full document text without truncation, got %d runes", len([]rune(got)))
 	}
+}
+
+func TestExtractPageLikeImagesSkipsSmallLogos(t *testing.T) {
+	// Build a tiny fake PDF-ish blob with one small and one larger JPEG.
+	var buf bytes.Buffer
+	buf.WriteString("%PDF-1.7\n")
+	small := fakeJPEG(2 << 10)
+	large := fakeJPEG(100 << 10)
+	buf.Write(small)
+	buf.Write(large)
+
+	imgs := extractPageLikeImagesFromPDF(buf.Bytes(), 4)
+	if len(imgs) != 1 {
+		t.Fatalf("expected 1 page-like image, got %d", len(imgs))
+	}
+}
+
+func fakeJPEG(size int) []byte {
+	if size < 4 {
+		size = 4
+	}
+	b := make([]byte, size)
+	b[0], b[1], b[2] = 0xff, 0xd8, 0xff
+	b[size-2], b[size-1] = 0xff, 0xd9
+	return b
 }
 
 func TestParseJSONObjectStripsCodeFence(t *testing.T) {
@@ -31,6 +57,21 @@ func TestParseJSONObjectStripsCodeFence(t *testing.T) {
 	}
 	if confidenceFromResult(got, 0) != 0.9 {
 		t.Fatalf("confidence = %v", got["confidence_score"])
+	}
+}
+
+func TestParseJSONObjectRepairsTruncation(t *testing.T) {
+	raw := `{"first_name":"Rozelna","last_name":"Bosch","experience":[{"company":"CBRE"`
+	got, err := parseJSONObject(raw)
+	if err != nil {
+		t.Fatalf("parseJSONObject() error = %v", err)
+	}
+	if got["first_name"] != "Rozelna" {
+		t.Fatalf("first_name = %v", got["first_name"])
+	}
+	exp, ok := got["experience"].([]interface{})
+	if !ok || len(exp) != 1 {
+		t.Fatalf("experience = %v", got["experience"])
 	}
 }
 

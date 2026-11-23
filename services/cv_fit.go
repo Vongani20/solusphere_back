@@ -7,20 +7,20 @@ import (
 	"solusphere_backend/models"
 )
 
-// Template slot limits — keep downloads clean and inside the SoluGrowth CV layout.
+// Template soft limits for PDF/Word layout fitting only (not used on import).
 const (
-	cvMaxProfileWords      = 80
-	cvMaxValuePropWords    = 120
-	cvMaxNameRunes         = 48
-	cvMaxLineRunes         = 72
-	cvMaxSkillDetails      = 2
-	cvMaxProfessionalSkills = 4
-	cvMaxQualifications    = 4
-	cvMaxComputerSkills    = 4
-	cvMaxMemberships       = 3
-	cvMaxLanguages         = 4
-	cvMaxExperience        = 2
-	cvMaxScopeBullets      = 4
+	cvMaxProfileWords       = 500
+	cvMaxValuePropWords     = 500
+	cvMaxNameRunes          = 80
+	cvMaxLineRunes          = 240
+	cvMaxSkillDetails       = 20
+	cvMaxProfessionalSkills = 40
+	cvMaxQualifications     = 40
+	cvMaxComputerSkills     = 40
+	cvMaxMemberships        = 40
+	cvMaxLanguages          = 40
+	cvMaxExperience         = 40
+	cvMaxScopeBullets       = 40
 )
 
 // FitCVProfileForTemplate returns a copy trimmed to the designated template slots

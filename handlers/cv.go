@@ -1,7 +1,9 @@
 package handlers
 
 import (
-	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -141,21 +143,15 @@ func validateCVProfile(p *models.CVProfile) map[string]string {
 	if p.Nationality == "" {
 		errs["nationality"] = "Nationality is required"
 	}
-	if p.DateOfBirth == "" {
-		errs["date_of_birth"] = "Date of birth is required"
-	}
 	if p.ProfileText == "" {
 		errs["profile_text"] = "Profile is required"
-	}
-	if p.ValueProposition == "" {
-		errs["value_proposition"] = "Value proposition is required"
 	}
 
 	return errs
 }
 
-// ImportCVFromDocument parses an uploaded CV PDF or Word (.docx) and returns
-// structured fields for the wizard.
+// ImportCVFromDocument parses an uploaded CV (PDF, Word, images, and similar) and returns
+// structured fields for the wizard. Scanned PDFs/images use OCR when needed.
 func ImportCVFromDocument(c *gin.Context) {
 	userID, ok := currentUserID(c)
 	if !ok {
@@ -166,58 +162,150 @@ func ImportCVFromDocument(c *gin.Context) {
 		return
 	}
 
-	file, err := c.FormFile("document")
+	filename, data, err := readCVImportPayload(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "CV document is required"})
+		var uploadErr *faceUploadError
+		if errors.As(err, &uploadErr) {
+			c.JSON(uploadErr.status, uploadErr.body)
+			return
+		}
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
 	}
 
-	ext := strings.ToLower(filepath.Ext(file.Filename))
-	if ext != ".pdf" && ext != ".docx" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Only PDF and Word (.docx) files are supported"})
+	const maxSize = 15 << 20 // 15 MB
+	if int64(len(data)) > maxSize {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "File must be smaller than 15 MB"})
 		return
 	}
 
-	const maxSize = 10 << 20 // 10 MB
-	if file.Size > maxSize {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "File must be smaller than 10 MB"})
+	// CloudFront origin timeout is 60s. Scanned/vectorized PDFs need longer
+	// for OpenAI vision, so import runs in the background and the client polls.
+	job := services.StartCVImportJob(userID, filename, data)
+	c.JSON(http.StatusAccepted, gin.H{
+		"job_id":  job.ID,
+		"status":  "processing",
+		"message": "Import started. Scanned PDFs can take up to a couple of minutes.",
+	})
+}
+
+// GetCVImportJob returns the status of a background CV import.
+func GetCVImportJob(c *gin.Context) {
+	userID, ok := currentUserID(c)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
-
-	src, err := file.Open()
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read uploaded file"})
+	jobID := strings.TrimSpace(c.Param("job_id"))
+	if jobID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "job_id is required"})
 		return
 	}
-	defer src.Close()
-
-	data, err := io.ReadAll(src)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read uploaded file"})
+	job := services.GetCVImportJob(jobID, userID)
+	if job == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Import job not found"})
 		return
 	}
-
-	text, err := services.ExtractTextFromCVUpload(file.Filename, data)
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Could not read text from document. Try a text-based PDF or .docx export.", "details": err.Error()})
+	if job.Status == "processing" {
+		c.JSON(http.StatusOK, gin.H{"job_id": job.ID, "status": job.Status})
 		return
 	}
-
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Minute)
-	defer cancel()
-
-	profile, warnings, err := services.ParseCVFromDocumentText(ctx, text)
-	if err != nil {
-		log.Printf("CV import failed: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to parse CV document", "details": err.Error()})
+	if job.Status == "error" {
+		c.JSON(http.StatusOK, gin.H{
+			"job_id":  job.ID,
+			"status":  job.Status,
+			"error":   "Could not import CV. Try PDF, Word, image scan, or another readable document.",
+			"details": job.Error,
+		})
 		return
 	}
-
 	c.JSON(http.StatusOK, gin.H{
-		"cv":       profile,
-		"warnings": warnings,
+		"job_id":   job.ID,
+		"status":   job.Status,
+		"cv":       job.Profile,
+		"warnings": job.Warnings,
 		"message":  "CV imported. Review the form and save when ready.",
 	})
+}
+
+type cvImportJSONRequest struct {
+	Document string `json:"document"`
+	Filename string `json:"filename"`
+}
+
+func readCVImportPayload(c *gin.Context) (string, []byte, error) {
+	contentType := strings.ToLower(strings.TrimSpace(c.GetHeader("Content-Type")))
+	if strings.HasPrefix(contentType, "application/json") {
+		const maxSize = 10 << 20
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxSize+8192)
+		body, err := io.ReadAll(c.Request.Body)
+		if err != nil {
+			return "", nil, &faceUploadError{
+				status: http.StatusBadRequest,
+				body:   gin.H{"error": "Failed to read request body"},
+			}
+		}
+
+		var req cvImportJSONRequest
+		if err := json.Unmarshal(body, &req); err != nil {
+			return "", nil, &faceUploadError{
+				status: http.StatusBadRequest,
+				body: gin.H{
+					"error":   "Invalid request body",
+					"message": "Expected JSON {\"document\":\"<base64>\",\"filename\":\"cv.pdf\"}",
+				},
+			}
+		}
+
+		filename := strings.TrimSpace(req.Filename)
+		if filename == "" {
+			filename = "document.pdf"
+		}
+		filename = filepath.Base(filename)
+
+		payload := strings.TrimSpace(req.Document)
+		if payload == "" {
+			return "", nil, &faceUploadError{
+				status: http.StatusBadRequest,
+				body:   gin.H{"error": "Document is required"},
+			}
+		}
+		if idx := strings.Index(payload, ","); idx >= 0 && strings.Contains(strings.ToLower(payload[:idx]), "base64") {
+			payload = payload[idx+1:]
+		}
+		data, err := base64.StdEncoding.DecodeString(payload)
+		if err != nil {
+			data, err = base64.RawStdEncoding.DecodeString(payload)
+		}
+		if err != nil || len(data) == 0 {
+			return "", nil, &faceUploadError{
+				status: http.StatusBadRequest,
+				body: gin.H{
+					"error":   "Invalid document encoding",
+					"message": "Document must be valid base64",
+				},
+			}
+		}
+		return filename, data, nil
+	}
+
+	file, err := c.FormFile("document")
+	if err != nil {
+		return "", nil, errors.New("CV document is required")
+	}
+	if file.Size > 15<<20 {
+		return "", nil, errors.New("File must be smaller than 15 MB")
+	}
+	src, err := file.Open()
+	if err != nil {
+		return "", nil, errors.New("Failed to read uploaded file")
+	}
+	defer src.Close()
+	data, err := io.ReadAll(src)
+	if err != nil {
+		return "", nil, errors.New("Failed to read uploaded file")
+	}
+	return file.Filename, data, nil
 }
 
 // UploadCVPhoto handles profile photo upload, stores in S3, and updates the CV record.
@@ -277,7 +365,7 @@ func UploadCVPhoto(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"profile_photo_url": models.ClientAccessiblePhotoURL(photoURL)})
 }
 
-// DownloadCVPDF generates and streams a branded PDF for the authenticated user.
+// DownloadCVPDF generates and streams a branded PDF (or Word via ?format=word) for the authenticated user.
 func DownloadCVPDF(c *gin.Context) {
 	userID, ok := currentUserID(c)
 	if !ok {
@@ -363,7 +451,7 @@ func GetCVByAdmin(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"cv": profile})
 }
 
-// DownloadCVByAdmin generates and streams the PDF for any user.
+// DownloadCVByAdmin generates and streams the PDF/Word for any user.
 func DownloadCVByAdmin(c *gin.Context) {
 	userID, ok := currentUserID(c)
 	if !ok {
@@ -385,18 +473,42 @@ func DownloadCVByAdmin(c *gin.Context) {
 // ---------- Shared helper ----------
 
 func downloadCVForUser(c *gin.Context, userID int) {
+	actorID, _ := currentUserID(c)
+	format := strings.ToLower(strings.TrimSpace(c.DefaultQuery("format", "pdf")))
+	wantWord := format == "word" || format == "docx"
+	action := models.CVBuilderActionDownloadPDF
+	formatLabel := "pdf"
+	if wantWord {
+		action = models.CVBuilderActionDownloadWord
+		formatLabel = "word"
+	}
+
+	logDownload := func(status, detail string) {
+		if actorID <= 0 {
+			return
+		}
+		entry := models.CVBuilderLog{
+			UserID: actorID,
+			Action: action,
+			Format: formatLabel,
+			Status: status,
+			Detail: detail,
+		}
+		enrichCVBuilderLogUser(&entry)
+		recordCVBuilderLog(c, entry)
+	}
+
 	profile, err := models.GetCVProfileByUserID(database.DB, userID)
 	if err != nil {
+		logDownload(models.CVBuilderStatusFailed, "Failed to load CV")
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to load CV"})
 		return
 	}
 	if profile == nil {
+		logDownload(models.CVBuilderStatusFailed, "CV not found")
 		c.JSON(http.StatusNotFound, gin.H{"error": "CV not found. Please fill in your CV details first."})
 		return
 	}
-
-	format := strings.ToLower(strings.TrimSpace(c.DefaultQuery("format", "pdf")))
-	wantWord := format == "word" || format == "docx"
 
 	var (
 		fileBytes   []byte
@@ -416,13 +528,22 @@ func downloadCVForUser(c *gin.Context, userID int) {
 		ext = "pdf"
 		label = "PDF"
 	} else {
+		logDownload(models.CVBuilderStatusFailed, "Unsupported format")
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Unsupported format. Use pdf or word (docx)."})
 		return
 	}
 	if err != nil {
+		log.Printf("CV %s generation failed for user %d: %v", label, userID, err)
+		logDownload(models.CVBuilderStatusFailed, "Failed to generate "+label)
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate " + label})
 		return
 	}
+
+	detail := formatLabel + " downloaded"
+	if actorID > 0 && actorID != userID {
+		detail = fmt.Sprintf("%s downloaded for user %d", formatLabel, userID)
+	}
+	logDownload(models.CVBuilderStatusSuccess, detail)
 
 	firstName := strings.TrimSpace(profile.FirstName)
 	lastName := strings.TrimSpace(profile.LastName)

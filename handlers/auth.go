@@ -64,7 +64,7 @@ func registerWithProvider(c *gin.Context, provider, successMessage string) {
 
 	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 	req.Username = strings.TrimSpace(req.Username)
-	req.PhoneNumber = strings.TrimSpace(req.PhoneNumber)
+	req.PhoneNumber = models.NormalizePhoneE164(req.PhoneNumber, "27")
 	birthDate, err := models.ParseBirthDate(req.BirthDate)
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
@@ -143,6 +143,15 @@ func Login(c *gin.Context) {
 		return
 	}
 
+	if user.IsDisabled {
+		recordPasswordLoginFailure(c, email, user, "account disabled")
+		c.JSON(http.StatusForbidden, gin.H{
+			"error": "This account has been disabled. Contact an administrator.",
+			"code":  "ACCOUNT_DISABLED",
+		})
+		return
+	}
+
 	faceStatus, imageURL, err := models.GetUserFaceRegistrationStatus(database.DB, user.ID)
 	if err != nil {
 		log.Printf("Face status lookup error for user %d: %v", user.ID, err)
@@ -188,6 +197,10 @@ func ForgotPassword(c *gin.Context) {
 	email := strings.TrimSpace(strings.ToLower(req.Email))
 	user, err := models.GetUserByEmail(database.DB, email)
 	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"message": "If this account can receive reset messages, a code has been sent."})
+		return
+	}
+	if user.IsDisabled {
 		c.JSON(http.StatusOK, gin.H{"message": "If this account can receive reset messages, a code has been sent."})
 		return
 	}
@@ -350,8 +363,10 @@ func deliverResetCode(user *models.User, message string) ([]string, []string) {
 	channels := []string{}
 	errors := []string{}
 
-	if strings.TrimSpace(user.PhoneNumber) != "" {
-		if err := models.PublishSMS(user.PhoneNumber, message); err != nil {
+	phone := models.NormalizePhoneE164(user.PhoneNumber, "27")
+	if phone != "" {
+		if err := models.PublishSMS(phone, message); err != nil {
+			log.Printf("Password reset SMS failed for user %d (%s): %v", user.ID, phone, err)
 			errors = append(errors, "sms: "+err.Error())
 		} else {
 			channels = append(channels, "sms")
@@ -366,7 +381,7 @@ func deliverResetCode(user *models.User, message string) ([]string, []string) {
 		}
 	}
 
-	if strings.TrimSpace(user.PhoneNumber) == "" {
+	if phone == "" {
 		errors = append(errors, "sms: user phone number is not registered")
 	}
 	if !services.IsMailConfigured() {

@@ -37,19 +37,12 @@ type RFPRisk struct {
 	Response string `json:"response"`
 }
 
-// RFPProposalResponse is one proposal answer to a requirement taken from the tender.
-type RFPProposalResponse struct {
-	Requirement string `json:"requirement"`
-	Response    string `json:"response"`
-}
-
 type RFPSolution struct {
-	Summary   string                 `json:"summary"`
-	Approach  []string               `json:"approach"`
-	WhyItFits []string               `json:"whyItFits"`
-	Team      []string               `json:"team"`
-	Risks     []RFPRisk              `json:"risks"`
-	Responses []RFPProposalResponse  `json:"responses"`
+	Summary   string    `json:"summary"`
+	Approach  []string  `json:"approach"`
+	WhyItFits []string  `json:"whyItFits"`
+	Team      []string  `json:"team"`
+	Risks     []RFPRisk `json:"risks"`
 }
 
 // RFPTemplate is the structured RFP template built from one or more tender documents.
@@ -275,9 +268,6 @@ func NormalizeRFPTemplateMap(input map[string]interface{}) RFPTemplate {
 	for _, p := range rfpPairs(sol["risks"], []string{"risk"}, []string{"response"}) {
 		t.Solution.Risks = append(t.Solution.Risks, RFPRisk{Risk: p[0], Response: p[1]})
 	}
-	for _, p := range rfpPairs(sol["responses"], []string{"requirement", "item"}, []string{"response", "answer"}) {
-		t.Solution.Responses = append(t.Solution.Responses, RFPProposalResponse{Requirement: p[0], Response: p[1]})
-	}
 	return NormalizeRFPTemplate(t)
 }
 
@@ -343,14 +333,6 @@ func NormalizeRFPTemplate(t RFPTemplate) RFPTemplate {
 		}
 	}
 	t.Solution.Risks = risks
-	responses := []RFPProposalResponse{}
-	for _, r := range t.Solution.Responses {
-		r.Requirement, r.Response = rfpString(r.Requirement), rfpString(r.Response)
-		if r.Requirement != "" || r.Response != "" {
-			responses = append(responses, r)
-		}
-	}
-	t.Solution.Responses = responses
 	return t
 }
 

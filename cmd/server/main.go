@@ -433,14 +433,17 @@ func main() {
 		public.POST("/forgot-password", handlers.ForgotPassword)
 		public.POST("/reset-password", handlers.ResetPassword)
 		public.POST("/face-login", handlers.FaceLogin(rekogSvc))
+		public.POST("/scan-login", handlers.FaceLogin(rekogSvc))
 	}
 
 	// Public face recognition endpoint (for login)
 	r.POST("/api/upload-face", handlers.FaceLogin(rekogSvc))
+	r.POST("/api/auth/scan", handlers.FaceLogin(rekogSvc))
 
 	// Protected routes (require authentication)
 	protected := r.Group("/api")
 	protected.Use(middleware.AuthMiddleware())
+	protected.Use(middleware.RequireEnabledUser())
 	protected.Use(middleware.RequireCompletedFaceRegistration())
 	{
 		// User routes
@@ -454,10 +457,13 @@ func main() {
 		protected.GET("/consent", handlers.GetUserConsents)
 		protected.POST("/consent", handlers.SignUserConsent)
 
-		// Face registration - requires authentication
+		// Face / identity registration - requires authentication
 		protected.POST("/face/register", handlers.RegisterFace(rekogSvc))
 		protected.PUT("/face/update", handlers.UpdateFace(rekogSvc))
 		protected.DELETE("/face/delete", handlers.DeleteFace(rekogSvc))
+		protected.POST("/identity/register", handlers.RegisterFace(rekogSvc))
+		protected.PUT("/identity/update", handlers.UpdateFace(rekogSvc))
+		protected.DELETE("/identity/delete", handlers.DeleteFace(rekogSvc))
 
 		// Helpdesk routes
 		protected.POST("/helpdesk", handlers.SubmitTicketHandler)
@@ -484,6 +490,20 @@ func main() {
 		protected.POST("/chats/:user_id/messages", handlers.SendDirectMessage)
 		protected.POST("/chats/:user_id/calls", handlers.StartCall)
 		protected.GET("/calls/ice-servers", handlers.GetCallICEServers)
+		protected.POST("/chats/messages/:message_id/reactions", handlers.ReactToDirectMessage)
+
+		// Group calls (mesh WebRTC, HTTP-polled signaling)
+		groupCalls := protected.Group("/group-calls")
+		{
+			groupCalls.POST("", handlers.StartGroupCall)
+			groupCalls.GET("/incoming", handlers.ListIncomingGroupCalls)
+			groupCalls.GET("/:call_id/sync", handlers.SyncGroupCall)
+			groupCalls.POST("/:call_id/join", handlers.JoinGroupCall)
+			groupCalls.POST("/:call_id/decline", handlers.DeclineGroupCall)
+			groupCalls.POST("/:call_id/leave", handlers.LeaveGroupCall)
+			groupCalls.POST("/:call_id/invite", handlers.InviteToGroupCall)
+			groupCalls.POST("/:call_id/signals", handlers.SendGroupCallSignal)
+		}
 
 		// Admin event chat routes
 		admin := protected.Group("/admin")
@@ -493,6 +513,7 @@ func main() {
 			admin.POST("/users", handlers.CreateUserByAdmin)
 			admin.GET("/users/:user_id", handlers.GetUserByAdmin)
 			admin.PATCH("/users/:user_id", handlers.UpdateUserByAdmin)
+			admin.PATCH("/users/:user_id/disabled", handlers.SetUserDisabledByAdmin)
 			admin.DELETE("/users/:user_id", handlers.DeleteUserByAdmin)
 			admin.PATCH("/users/:user_id/role", handlers.UpdateUserRole)
 			admin.POST("/events", handlers.CreateEvent)
@@ -507,11 +528,16 @@ func main() {
 			admin.PATCH("/helpdesk/:ticket_id", handlers.UpdateHelpdeskTicketByAdmin)
 			admin.DELETE("/helpdesk/:ticket_id", handlers.DeleteHelpdeskTicketByAdmin)
 			admin.GET("/login-audit", handlers.ListLoginAuditLogsByAdmin)
+			admin.GET("/innovation", handlers.ListInnovationIdeasByAdmin)
+			admin.PATCH("/innovation/:idea_id", handlers.UpdateInnovationIdeaByAdmin)
 		}
 
 		// Chatbot routes
 		protected.POST("/chatbot", handlers.ChatbotHandler())
 		protected.POST("/chatbot/report", handlers.SIAReportHandler())
+
+		// Innovation / SoluGility
+		protected.POST("/innovation", handlers.SubmitInnovationIdea)
 
 		// BPO Analysis routes
 		bpo := protected.Group("/bpo")
@@ -532,7 +558,9 @@ func main() {
 			cv.DELETE("", handlers.DeleteCV)
 			cv.POST("/photo", handlers.UploadCVPhoto)
 			cv.POST("/import", handlers.ImportCVFromDocument)
+			cv.GET("/import/:job_id", handlers.GetCVImportJob)
 			cv.GET("/download", handlers.DownloadCVPDF)
+			cv.POST("/logs", handlers.CreateCVBuilderLog)
 			cv.GET("/search", handlers.SearchCVs)
 		}
 
@@ -553,6 +581,8 @@ func main() {
 		admin.GET("/cvs", handlers.ListCVsByAdmin)
 		admin.GET("/cvs/:user_id", handlers.GetCVByAdmin)
 		admin.GET("/cvs/:user_id/download", handlers.DownloadCVByAdmin)
+		admin.GET("/cv-builder-logs", handlers.ListCVBuilderLogsByAdmin)
+		admin.GET("/cv-builder-logs/download", handlers.DownloadCVBuilderLogsTXT)
 
 		// File upload routes
 		protected.POST("/upload", handlers.UploadHandler)
@@ -569,6 +599,10 @@ func main() {
 		if appSecrets.AWSRegion != "" && appSecrets.AWSBucketName != "" {
 			awsStatus = "configured"
 		}
+		turnStatus := "not_configured"
+		if os.Getenv("TURN_URLS") != "" && (os.Getenv("TURN_SECRET") != "" || os.Getenv("TURN_CREDENTIAL") != "") {
+			turnStatus = "configured"
+		}
 		openAIStatus := "not_configured"
 		if services.IsOpenAIInitialized() {
 			openAIStatus = "configured"
@@ -583,6 +617,7 @@ func main() {
 			"database_name":  appSecrets.DBName,
 			"aws_status":     awsStatus,
 			"openai_status":  openAIStatus,
+			"turn_status":    turnStatus,
 			"openai_model":   services.GetOpenAIModel(),
 			"secrets_source": getSecretsSource(useAWSSecrets, useSecretsAgent),
 			"secret_name":    os.Getenv("AWS_SECRET_NAME"),
@@ -643,6 +678,8 @@ func main() {
 	log.Println("  PATCH /api/admin/helpdesk/:ticket_id (admin)")
 	log.Println("  DELETE /api/admin/helpdesk/:ticket_id (admin)")
 	log.Println("  GET  /api/admin/login-audit (admin)")
+	log.Println("  GET  /api/admin/cv-builder-logs (admin)")
+	log.Println("  GET  /api/admin/cv-builder-logs/download (admin)")
 	log.Println("  POST /api/chatbot (requires auth)")
 	log.Println("  POST /api/chatbot/report (requires auth)")
 	log.Println("  POST /api/bpo/analyze-pdf (requires auth)")
@@ -653,6 +690,7 @@ func main() {
 	log.Println("  POST /api/cv/photo (requires auth)")
 	log.Println("  POST /api/cv/import (requires auth)")
 	log.Println("  GET  /api/cv/download (requires auth)")
+	log.Println("  POST /api/cv/logs (requires auth)")
 	log.Println("  GET  /api/cv/search?skill=&qualification= (requires auth)")
 	log.Println("  GET  /api/admin/cvs (admin)")
 	log.Println("  GET  /api/admin/cvs/:user_id (admin)")

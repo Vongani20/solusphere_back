@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -41,47 +43,112 @@ func rfpRespondError(c *gin.Context, err error) {
 	c.JSON(http.StatusInternalServerError, gin.H{"error": "Something went wrong."})
 }
 
-// rfpSourcesFromRequest reads the multipart "files" field (also accepts "document").
+type rfpUpload struct {
+	name string
+	data []byte
+}
+
+type rfpJSONUploadRequest struct {
+	Documents []struct {
+		// Filename only carries the extension (e.g. "document.pdf"); DisplayName is shown to users.
+		Filename    string `json:"filename"`
+		DisplayName string `json:"display_name"`
+		Document    string `json:"document"`
+	} `json:"documents"`
+}
+
+// rfpMaxJSONBody bounds base64 JSON uploads (base64 adds about a third).
+const rfpMaxJSONBody = 64 << 20
+
+// readRFPUploads accepts JSON {"documents":[{"filename","display_name","document":"<base64>"}]}
+// (used by the UI, because corporate proxies block multipart file uploads) or multipart "files".
+func readRFPUploads(c *gin.Context) ([]rfpUpload, error) {
+	contentType := strings.ToLower(strings.TrimSpace(c.GetHeader("Content-Type")))
+	uploads := []rfpUpload{}
+
+	if strings.HasPrefix(contentType, "application/json") {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, rfpMaxJSONBody)
+		var req rfpJSONUploadRequest
+		if err := json.NewDecoder(c.Request.Body).Decode(&req); err != nil {
+			return nil, rfpBadRequest("The upload was too large or not readable. Keep the total under about 45 MB.")
+		}
+		for _, d := range req.Documents {
+			payload := strings.TrimSpace(d.Document)
+			if idx := strings.Index(payload, ","); idx >= 0 && strings.Contains(strings.ToLower(payload[:idx]), "base64") {
+				payload = payload[idx+1:]
+			}
+			data, err := base64.StdEncoding.DecodeString(payload)
+			if err != nil {
+				data, err = base64.RawStdEncoding.DecodeString(payload)
+			}
+			if err != nil || len(data) == 0 {
+				return nil, rfpBadRequest("One of the documents could not be read. Try uploading it again.")
+			}
+			ext := filepath.Ext(filepath.Base(strings.TrimSpace(d.Filename)))
+			name := filepath.Base(strings.TrimSpace(d.DisplayName))
+			if name == "" || name == "." {
+				name = "document" + ext
+			}
+			if !strings.EqualFold(filepath.Ext(name), ext) {
+				name += ext
+			}
+			uploads = append(uploads, rfpUpload{name: name, data: data})
+		}
+	} else {
+		form, err := c.MultipartForm()
+		if err != nil {
+			return nil, rfpBadRequest("Choose at least one document.")
+		}
+		for _, fh := range append(form.File["files"], form.File["document"]...) {
+			if fh.Size > rfpMaxFileSize {
+				return nil, rfpBadRequest("Each file needs to be 15 MB or smaller.")
+			}
+			f, err := fh.Open()
+			if err != nil {
+				return nil, err
+			}
+			data, err := io.ReadAll(f)
+			f.Close()
+			if err != nil {
+				return nil, err
+			}
+			uploads = append(uploads, rfpUpload{name: filepath.Base(fh.Filename), data: data})
+		}
+	}
+	return uploads, nil
+}
+
+// rfpSourcesFromRequest validates uploads and extracts their text.
 func rfpSourcesFromRequest(c *gin.Context) ([]models.RFPSource, error) {
-	form, err := c.MultipartForm()
+	uploads, err := readRFPUploads(c)
 	if err != nil {
+		return nil, err
+	}
+	if len(uploads) == 0 {
 		return nil, rfpBadRequest("Choose at least one document.")
 	}
-	files := append(form.File["files"], form.File["document"]...)
-	if len(files) == 0 {
-		return nil, rfpBadRequest("Choose at least one document.")
-	}
-	if len(files) > rfpMaxFiles {
+	if len(uploads) > rfpMaxFiles {
 		return nil, rfpBadRequest("You can add up to 12 documents.")
 	}
 
 	sources := []models.RFPSource{}
-	for _, fh := range files {
-		ext := strings.ToLower(filepath.Ext(fh.Filename))
+	for _, up := range uploads {
+		ext := strings.ToLower(filepath.Ext(up.name))
 		if ext != ".pdf" && ext != ".docx" && ext != ".txt" && ext != ".md" {
 			return nil, rfpBadRequest("Upload a PDF, Word (.docx), or text file.")
 		}
-		if fh.Size > rfpMaxFileSize {
+		if len(up.data) > rfpMaxFileSize {
 			return nil, rfpBadRequest("Each file needs to be 15 MB or smaller.")
 		}
-		f, err := fh.Open()
+		text, err := services.ExtractRFPSourceText(up.name, up.data)
 		if err != nil {
-			return nil, err
-		}
-		data, err := io.ReadAll(f)
-		f.Close()
-		if err != nil {
-			return nil, err
-		}
-		text, err := services.ExtractRFPSourceText(fh.Filename, data)
-		if err != nil {
-			log.Printf("RFP: could not read %s: %v", fh.Filename, err)
+			log.Printf("RFP: could not read %s: %v", up.name, err)
 			continue
 		}
 		if len([]rune(text)) < 20 {
 			continue
 		}
-		sources = append(sources, models.RFPSource{Name: filepath.Base(fh.Filename), Text: text})
+		sources = append(sources, models.RFPSource{Name: up.name, Text: text})
 	}
 	if len(sources) == 0 {
 		return nil, rfpBadRequest("Those files do not contain enough text. If a PDF is a scan, export a text-based copy or upload a Word file.")

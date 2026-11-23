@@ -21,11 +21,15 @@ const (
 	cvML    = 12.0
 	cvMR    = 12.0
 	cvMT    = 10.0
-	cvCol1X = cvML
-	cvCol1W = 63.0
-	cvGap   = 5.0
-	cvCol2X = cvCol1X + cvCol1W + cvGap
-	cvCol2W = cvPageW - cvMR - cvCol2X
+	cvLogoW = 52.0
+	cvLogoH = 18.0
+	// Keep right-column panels below the brand logo so they never cover it.
+	cvHeaderBottom = cvMT + cvLogoH + 2
+	cvCol1X        = cvML
+	cvCol1W        = 63.0
+	cvGap          = 5.0
+	cvCol2X        = cvCol1X + cvCol1W + cvGap
+	cvCol2W        = cvPageW - cvMR - cvCol2X
 )
 
 // Brand colours aligned with the SoluGrowth CV template.
@@ -51,21 +55,44 @@ func NewCVPDFService() *CVPDFService {
 	return &CVPDFService{}
 }
 
-func (s *CVPDFService) GeneratePDF(profile *models.CVProfile) ([]byte, error) {
+func (s *CVPDFService) GeneratePDF(profile *models.CVProfile) (out []byte, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			log.Printf("CV PDF panic: %v", rec)
+			out = nil
+			err = fmt.Errorf("PDF generation panicked: %v", rec)
+		}
+	}()
+
 	if profile == nil {
 		return nil, fmt.Errorf("profile is required")
 	}
-	profile = FitCVProfileForTemplate(profile)
+	// Export the full CV — do not truncate fields for template fit.
+	models.SanitizeCVProfile(profile)
+	// gofpdf Helvetica is WinAnsi/Latin-1 only; Unicode (curly quotes, etc.) panics.
+	pdfSafeProfile(profile)
 
 	pdf := fpdf.New("P", "mm", "A4", "")
 	pdf.SetMargins(cvML, cvMT, cvMR)
 	pdf.SetAutoPageBreak(false, 0)
+	pdf.AliasNbPages("")
 
 	pdf.AddPage()
-	s.drawPage1(pdf, profile)
+	cursor := s.drawPage1(pdf, profile)
+	for safety := 0; cursor.section != cvSectionDone && safety < 40; safety++ {
+		pdf.AddPage()
+		cursor = s.drawSidebarContinuation(pdf, profile, cursor)
+	}
 
 	pdf.AddPage()
-	s.drawPage2(pdf, profile)
+	s.drawExperiencePages(pdf, profile)
+
+	total := pdf.PageCount()
+	for page := 1; page <= total; page++ {
+		pdf.SetPage(page)
+		s.drawPageFooterLine(pdf)
+		s.drawFooter(pdf, page, total)
+	}
 
 	var buf bytes.Buffer
 	if err := pdf.Output(&buf); err != nil {
@@ -74,10 +101,26 @@ func (s *CVPDFService) GeneratePDF(profile *models.CVProfile) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func (s *CVPDFService) drawPage1(pdf *fpdf.Fpdf, profile *models.CVProfile) {
-	logoW, logoH := 52.0, 18.0
-	logoX := cvPageW - cvMR - logoW
-	s.drawBrandHeader(pdf, logoX, cvMT, logoW, logoH)
+const cvContentBottom = cvPageH - 16.0
+
+type cvSidebarSection int
+
+const (
+	cvSectionSkills cvSidebarSection = iota
+	cvSectionQualifications
+	cvSectionComputer
+	cvSectionMemberships
+	cvSectionLanguages
+	cvSectionDone
+)
+
+type cvSidebarCursor struct {
+	section cvSidebarSection
+	index   int
+}
+
+func (s *CVPDFService) drawPage1(pdf *fpdf.Fpdf, profile *models.CVProfile) cvSidebarCursor {
+	logoX := cvPageW - cvMR - cvLogoW
 
 	pdf.SetXY(cvML, cvMT)
 	pdf.SetFont("Helvetica", "B", 17)
@@ -94,86 +137,156 @@ func (s *CVPDFService) drawPage1(pdf *fpdf.Fpdf, profile *models.CVProfile) {
 	pdf.CellFormat(availW, 5, "CURRICULUM VITAE", "", 1, "L", false, 0, "")
 	setCV_Black(pdf)
 
-	contentTopY := cvMT + 16
+	contentTopY := cvHeaderBottom
 	leftY := contentTopY
 
+	// Photo + PROFILE stay on page 1, top-left column (under the name header).
 	photoH := 52.0
 	s.drawPhoto(pdf, cvCol1X, leftY, cvCol1W, photoH, profile.ProfilePhotoURL)
 	leftY += photoH + 5
 
-	pdf.SetXY(cvCol1X, leftY)
-	s.drawLeftHeading(pdf, "PROFILE", cvCol1W)
-	leftY = pdf.GetY() + 1
-	pdf.SetXY(cvCol1X, leftY)
-	pdf.SetFont("Helvetica", "", 7.5)
-	setCV_Black(pdf)
-	profileText := profile.ProfileText
-	if profileText == "" {
-		profileText = "[Insert profile. Should be no longer than 80 words]."
-	}
-	pdf.MultiCell(cvCol1W, 4, profileText, "", "L", false)
-	leftY = pdf.GetY() + 5
-
-	pdf.SetXY(cvCol1X, leftY)
-	s.drawLeftHeading(pdf, "VALUE PROPOSITION", cvCol1W)
-	leftY = pdf.GetY() + 1
-	pdf.SetXY(cvCol1X, leftY)
-	pdf.SetFont("Helvetica", "", 7.5)
-	setCV_Black(pdf)
-	vp := profile.ValueProposition
-	if vp == "" {
-		vp = "[Insert value proposition. This is how the user applies their skills in a way that produces any outcome or solves a problem. Should be no longer than 150 words]"
-	}
-	pdf.MultiCell(cvCol1W, 4, vp, "", "L", false)
+	_ = s.drawLeftWrappedSection(pdf, "PROFILE", profile.ProfileText, "[Insert profile summary].", cvCol1X, leftY, cvCol1W, cvContentBottom-8)
 
 	boxTop := contentTopY
-	footerY := cvPageH - 10.0
-	boxH := footerY - boxTop - 2
+	boxH := cvContentBottom - boxTop - 2
 	pdf.SetFillColor(cvSideR, cvSideG, cvSideB)
 	pdf.Rect(cvCol2X, boxTop, cvCol2W, boxH, "F")
+	// Draw the logo after the sidebar fill so it is never covered.
+	s.drawBrandHeader(pdf, logoX, cvMT, cvLogoW, cvLogoH)
 
 	innerX := cvCol2X + 4
 	innerW := cvCol2W - 8
 	rightY := boxTop + 4
+	maxY := boxTop + boxH - 2
 
 	rightY = s.drawRightHeading(pdf, "PERSONAL DETAILS", "P", innerX, rightY, innerW)
 	rightY = s.drawPersonalDetails(pdf, profile, innerX, rightY, innerW)
 	rightY += 3
 
-	rightY = s.drawRightHeading(pdf, "PROFESSIONAL SKILLS", "S", innerX, rightY, innerW)
-	rightY = s.drawSkillsList(pdf, profile.ProfessionalSkills, innerX, rightY, innerW)
-	rightY += 3
-
-	rightY = s.drawRightHeading(pdf, "QUALIFICATIONS AND TRAINING", "Q", innerX, rightY, innerW)
-	rightY = s.drawBulletList(pdf, profile.Qualifications, "[Insert qualification]", innerX, rightY, innerW)
-	rightY += 3
-
-	rightY = s.drawRightHeading(pdf, "COMPUTER SKILLS", "C", innerX, rightY, innerW)
-	rightY = s.drawBulletList(pdf, profile.ComputerSkills, "[Insert skills]", innerX, rightY, innerW)
-	rightY += 3
-
-	rightY = s.drawRightHeading(pdf, "PROFESSIONAL MEMBERSHIP", "M", innerX, rightY, innerW)
-	rightY = s.drawBulletList(pdf, profile.ProfessionalMemberships, "[Insert memberships]", innerX, rightY, innerW)
-	rightY += 3
-
-	rightY = s.drawRightHeading(pdf, "LANGUAGES", "L", innerX, rightY, innerW)
-	s.drawBulletList(pdf, profile.Languages, "[Insert language(s)]", innerX, rightY, innerW)
-
-	_ = rightY
-	s.drawFooter(pdf, 1, 2)
+	return s.drawSidebarFrom(pdf, profile, cvSidebarCursor{section: cvSectionSkills}, innerX, rightY, innerW, maxY)
 }
 
-func (s *CVPDFService) drawPage2(pdf *fpdf.Fpdf, profile *models.CVProfile) {
-	logoW, logoH := 52.0, 18.0
-	logoX := cvPageW - cvMR - logoW
-	s.drawBrandHeader(pdf, logoX, cvMT, logoW, logoH)
+func (s *CVPDFService) drawSidebarContinuation(pdf *fpdf.Fpdf, profile *models.CVProfile, start cvSidebarCursor) cvSidebarCursor {
+	logoX := cvPageW - cvMR - cvLogoW
 
-	y := cvMT
-	pdf.SetXY(cvML, y)
-	pdf.SetFont("Helvetica", "B", 11)
-	setCV_Teal(pdf)
-	pdf.CellFormat(180, 7, "EXPERIENCE", "", 1, "L", false, 0, "")
-	y += 9
+	boxTop := cvHeaderBottom
+	boxH := cvContentBottom - boxTop - 2
+	pdf.SetFillColor(cvSideR, cvSideG, cvSideB)
+	pdf.Rect(cvCol2X, boxTop, cvCol2W, boxH, "F")
+	// Logo last so continuation panels cannot cover the brand mark.
+	s.drawBrandHeader(pdf, logoX, cvMT, cvLogoW, cvLogoH)
+
+	innerX := cvCol2X + 4
+	innerW := cvCol2W - 8
+	rightY := boxTop + 4
+	maxY := boxTop + boxH - 2
+
+	pdf.SetXY(innerX, rightY)
+	pdf.SetFont("Helvetica", "I", 7.5)
+	setCV_Gray(pdf)
+	pdf.CellFormat(innerW, 4, "Continued...", "", 1, "L", false, 0, "")
+	setCV_Black(pdf)
+	rightY += 5
+
+	return s.drawSidebarFrom(pdf, profile, start, innerX, rightY, innerW, maxY)
+}
+
+func (s *CVPDFService) drawSidebarFrom(pdf *fpdf.Fpdf, profile *models.CVProfile, start cvSidebarCursor, x, y, w, maxY float64) cvSidebarCursor {
+	type sectionDef struct {
+		id    cvSidebarSection
+		title string
+		icon  string
+		draw  func(startIdx int, yy float64) (float64, int, bool)
+	}
+
+	sections := []sectionDef{
+		{cvSectionSkills, "PROFESSIONAL SKILLS", "S", func(startIdx int, yy float64) (float64, int, bool) {
+			return s.drawSkillsList(pdf, profile.ProfessionalSkills, x, yy, w, maxY, startIdx)
+		}},
+		{cvSectionQualifications, "QUALIFICATIONS AND TRAINING", "Q", func(startIdx int, yy float64) (float64, int, bool) {
+			return s.drawBulletList(pdf, profile.Qualifications, "[Insert qualification]", x, yy, w, maxY, startIdx)
+		}},
+		{cvSectionComputer, "COMPUTER SKILLS", "C", func(startIdx int, yy float64) (float64, int, bool) {
+			return s.drawBulletList(pdf, profile.ComputerSkills, "[Insert skills]", x, yy, w, maxY, startIdx)
+		}},
+		{cvSectionMemberships, "PROFESSIONAL MEMBERSHIP", "M", func(startIdx int, yy float64) (float64, int, bool) {
+			return s.drawBulletList(pdf, profile.ProfessionalMemberships, "[Insert memberships]", x, yy, w, maxY, startIdx)
+		}},
+		{cvSectionLanguages, "LANGUAGES", "L", func(startIdx int, yy float64) (float64, int, bool) {
+			return s.drawBulletList(pdf, profile.Languages, "[Insert language(s)]", x, yy, w, maxY, startIdx)
+		}},
+	}
+
+	active := false
+	for _, section := range sections {
+		if section.id == start.section {
+			active = true
+		}
+		if !active {
+			continue
+		}
+
+		startIdx := 0
+		if section.id == start.section {
+			startIdx = start.index
+		}
+		if y+8 > maxY {
+			return cvSidebarCursor{section: section.id, index: startIdx}
+		}
+
+		// Only redraw heading when starting the section (or continuing with remaining items).
+		if startIdx == 0 {
+			y = s.drawRightHeading(pdf, section.title, section.icon, x, y, w)
+		} else {
+			pdf.SetXY(x, y)
+			pdf.SetFont("Helvetica", "I", 7)
+			setCV_Gray(pdf)
+			pdf.CellFormat(w, 4, section.title+" (continued)", "", 1, "L", false, 0, "")
+			setCV_Black(pdf)
+			y += 4
+		}
+
+		nextY, nextIdx, done := section.draw(startIdx, y)
+		if !done {
+			return cvSidebarCursor{section: section.id, index: nextIdx}
+		}
+		y = nextY + 3
+		if y > maxY {
+			next := section.id + 1
+			if next >= cvSectionDone {
+				return cvSidebarCursor{section: cvSectionDone}
+			}
+			return cvSidebarCursor{section: next, index: 0}
+		}
+	}
+	return cvSidebarCursor{section: cvSectionDone}
+}
+
+func (s *CVPDFService) drawLeftWrappedSection(pdf *fpdf.Fpdf, title, text, placeholder string, x, y, w, maxY float64) float64 {
+	pdf.SetXY(x, y)
+	s.drawLeftHeading(pdf, title, w)
+	y = pdf.GetY() + 1
+	if strings.TrimSpace(text) == "" {
+		text = placeholder
+	}
+	pdf.SetFont("Helvetica", "", 7.5)
+	setCV_Black(pdf)
+	lines := pdf.SplitText(pdfSafeText(text), w)
+	lineH := 4.0
+	for _, line := range lines {
+		if y+lineH > maxY {
+			break
+		}
+		pdf.SetXY(x, y)
+		pdf.CellFormat(w, lineH, line, "", 1, "L", false, 0, "")
+		y += lineH
+	}
+	return y
+}
+
+func (s *CVPDFService) drawExperiencePages(pdf *fpdf.Fpdf, profile *models.CVProfile) {
+	s.drawExperienceHeader(pdf)
+	y := cvMT + 9
 	setCV_Black(pdf)
 
 	if len(profile.Experience) == 0 {
@@ -182,11 +295,15 @@ func (s *CVPDFService) drawPage2(pdf *fpdf.Fpdf, profile *models.CVProfile) {
 		setCV_Gray(pdf)
 		pdf.CellFormat(180, 5, "[No experience entries added yet]", "", 1, "L", false, 0, "")
 		setCV_Black(pdf)
+		return
 	}
 
 	for i, exp := range profile.Experience {
-		if y > 268 {
-			break
+		needed := 20.0
+		if y+needed > cvContentBottom {
+			pdf.AddPage()
+			s.drawExperienceHeader(pdf)
+			y = cvMT + 9
 		}
 
 		company := exp.Company
@@ -202,60 +319,115 @@ func (s *CVPDFService) drawPage2(pdf *fpdf.Fpdf, profile *models.CVProfile) {
 			period = "[Month yyyy - Month yyyy]"
 		}
 
-		pdf.SetXY(cvML, y)
-		pdf.SetFont("Helvetica", "B", 8.5)
-		pdf.CellFormat(28, 5, "Company:", "", 0, "L", false, 0, "")
-		pdf.CellFormat(152, 5, company, "", 1, "L", false, 0, "")
-		y += 5
-
-		pdf.SetXY(cvML, y)
-		pdf.CellFormat(28, 5, "Position:", "", 0, "L", false, 0, "")
-		pdf.CellFormat(152, 5, position, "", 1, "L", false, 0, "")
-		y += 5
-
-		pdf.SetXY(cvML, y)
-		pdf.SetFont("Helvetica", "", 8.5)
-		pdf.CellFormat(28, 5, "Period:", "", 0, "L", false, 0, "")
-		pdf.CellFormat(152, 5, period, "", 1, "L", false, 0, "")
-		y += 5
+		y = s.drawLabeledWrapped(pdf, "Company:", company, cvML, y, 28, cvPageW-cvML-cvMR-28)
+		y = s.drawLabeledWrapped(pdf, "Position:", position, cvML, y, 28, cvPageW-cvML-cvMR-28)
+		y = s.drawLabeledWrapped(pdf, "Period:", period, cvML, y, 28, cvPageW-cvML-cvMR-28)
 
 		scopes := exp.ScopeOfWork
 		if len(scopes) == 0 {
 			scopes = []string{"[Insert concise points that describe what the user did in the role]"}
 		}
 
+		if y+6 > cvContentBottom {
+			pdf.AddPage()
+			s.drawExperienceHeader(pdf)
+			y = cvMT + 9
+		}
 		pdf.SetXY(cvML, y)
 		pdf.SetFont("Helvetica", "B", 8.5)
 		setCV_Teal(pdf)
 		pdf.CellFormat(180, 5, "Scope of work:", "", 1, "L", false, 0, "")
 		y += 5
 		setCV_Black(pdf)
+
 		for _, scope := range scopes {
-			if y > 270 {
-				break
+			scope = strings.TrimSpace(scope)
+			if scope == "" {
+				continue
 			}
-			pdf.SetXY(cvML+4, y)
+			text := pdfSafeText("- " + scope)
 			pdf.SetFont("Helvetica", "", 8)
-			pdf.MultiCell(176-4, 4.5, "- "+scope, "", "L", false)
-			y = pdf.GetY()
+			lines := pdf.SplitText(text, 172)
+			need := float64(len(lines)) * 4.5
+			if y+need > cvContentBottom {
+				pdf.AddPage()
+				s.drawExperienceHeader(pdf)
+				y = cvMT + 9
+				pdf.SetFont("Helvetica", "I", 7.5)
+				setCV_Gray(pdf)
+				pdf.SetXY(cvML, y)
+				pdf.CellFormat(180, 4, "Scope of work (continued):", "", 1, "L", false, 0, "")
+				y += 5
+				setCV_Black(pdf)
+				pdf.SetFont("Helvetica", "", 8)
+			}
+			for _, line := range lines {
+				pdf.SetXY(cvML+4, y)
+				pdf.CellFormat(172, 4.5, line, "", 1, "L", false, 0, "")
+				y += 4.5
+			}
 		}
 
 		if i < len(profile.Experience)-1 {
 			y += 2
-			pdf.SetDrawColor(180, 180, 180)
-			pdf.SetLineWidth(0.2)
-			pdf.Line(cvML, y, cvPageW-cvMR, y)
-			y += 4
+			if y+4 > cvContentBottom {
+				pdf.AddPage()
+				s.drawExperienceHeader(pdf)
+				y = cvMT + 9
+			} else {
+				pdf.SetDrawColor(180, 180, 180)
+				pdf.SetLineWidth(0.2)
+				pdf.Line(cvML, y, cvPageW-cvMR, y)
+				y += 4
+			}
 		} else {
-			y += 6
+			y += 4
 		}
 	}
+}
 
+func (s *CVPDFService) drawExperienceHeader(pdf *fpdf.Fpdf) {
+	logoX := cvPageW - cvMR - cvLogoW
+	s.drawBrandHeader(pdf, logoX, cvMT, cvLogoW, cvLogoH)
+
+	pdf.SetXY(cvML, cvMT)
+	pdf.SetFont("Helvetica", "B", 11)
+	setCV_Teal(pdf)
+	pdf.CellFormat(180, 7, "EXPERIENCE", "", 1, "L", false, 0, "")
+	setCV_Black(pdf)
+}
+
+func (s *CVPDFService) drawLabeledWrapped(pdf *fpdf.Fpdf, label, value string, x, y, labelW, valueW float64) float64 {
+	pdf.SetXY(x, y)
+	pdf.SetFont("Helvetica", "B", 8.5)
+	setCV_Black(pdf)
+	pdf.CellFormat(labelW, 5, label, "", 0, "L", false, 0, "")
+	pdf.SetFont("Helvetica", "", 8.5)
+	lines := pdf.SplitText(pdfSafeText(value), valueW)
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	for i, line := range lines {
+		if i == 0 {
+			pdf.SetXY(x+labelW, y)
+		} else {
+			y += 5
+			if y+5 > cvContentBottom {
+				pdf.AddPage()
+				s.drawExperienceHeader(pdf)
+				y = cvMT + 9
+			}
+			pdf.SetXY(x+labelW, y)
+		}
+		pdf.CellFormat(valueW, 5, line, "", 1, "L", false, 0, "")
+	}
+	return y + 5
+}
+
+func (s *CVPDFService) drawPageFooterLine(pdf *fpdf.Fpdf) {
 	pdf.SetDrawColor(0, 0, 0)
 	pdf.SetLineWidth(0.3)
-	pdf.Line(cvML, 285, cvPageW-cvMR, 285)
-
-	s.drawFooter(pdf, 2, 2)
+	pdf.Line(cvML, cvPageH-12, cvPageW-cvMR, cvPageH-12)
 }
 
 func (s *CVPDFService) drawBrandHeader(pdf *fpdf.Fpdf, x, y, w, h float64) {
@@ -283,9 +455,20 @@ func (s *CVPDFService) drawPhoto(pdf *fpdf.Fpdf, x, y, w, h float64, photoURL st
 	pdf.SetFillColor(210, 210, 210)
 	pdf.Rect(x+shadowOffset, y+shadowOffset, w, h, "F")
 
+	drawn := false
 	if photoURL != "" {
-		imgData, imgType, err := downloadImage(photoURL)
-		if err == nil {
+		func() {
+			defer func() {
+				if rec := recover(); rec != nil {
+					log.Printf("CV PDF: photo render panic for %q: %v", photoURL, rec)
+					drawn = false
+				}
+			}()
+			imgData, imgType, err := downloadImage(photoURL)
+			if err != nil {
+				log.Printf("CV PDF: failed to load profile photo %q: %v", photoURL, err)
+				return
+			}
 			name := fmt.Sprintf("cv-photo-%d", time.Now().UnixNano())
 			opts := fpdf.ImageOptions{ImageType: imgType}
 			info := pdf.RegisterImageOptionsReader(name, opts, bytes.NewReader(imgData))
@@ -306,9 +489,11 @@ func (s *CVPDFService) drawPhoto(pdf *fpdf.Fpdf, x, y, w, h float64, photoURL st
 			pdf.SetDrawColor(220, 220, 220)
 			pdf.SetLineWidth(0.2)
 			pdf.Rect(x, y, w, h, "D")
-			return
-		}
-		log.Printf("CV PDF: failed to load profile photo %q: %v", photoURL, err)
+			drawn = true
+		}()
+	}
+	if drawn {
+		return
 	}
 
 	pdf.SetDrawColor(200, 200, 200)
@@ -356,14 +541,10 @@ func (s *CVPDFService) drawPersonalDetails(pdf *fpdf.Fpdf, profile *models.CVPro
 	if profile.Nationality != "" {
 		rows = append(rows, row{"Nationality:", profile.Nationality})
 	}
-	if profile.DateOfBirth != "" {
-		rows = append(rows, row{"Date of birth:", formatCVDate(profile.DateOfBirth)})
-	}
 	if len(rows) == 0 {
 		rows = []row{
 			{"Gender:", "[Insert gender]"},
 			{"Nationality:", "[Insert nationality]"},
-			{"Date of birth:", "dd Month yyyy"},
 		}
 	}
 
@@ -372,34 +553,48 @@ func (s *CVPDFService) drawPersonalDetails(pdf *fpdf.Fpdf, profile *models.CVPro
 	for _, r := range rows {
 		pdf.SetXY(x, y)
 		pdf.SetFont("Helvetica", "", 7.5)
-		setCV_Gray(pdf)
-		pdf.CellFormat(labelW, lineH, r.label, "", 0, "L", false, 0, "")
-		setCV_Black(pdf)
-		pdf.CellFormat(w-labelW, lineH, r.value, "", 1, "L", false, 0, "")
+	setCV_Gray(pdf)
+	pdf.CellFormat(labelW, lineH, pdfSafeText(r.label), "", 0, "L", false, 0, "")
+	setCV_Black(pdf)
+	pdf.CellFormat(w-labelW, lineH, pdfSafeText(r.value), "", 1, "L", false, 0, "")
 		y += lineH
 	}
 	return y
 }
 
-func (s *CVPDFService) drawSkillsList(pdf *fpdf.Fpdf, skills []models.ProfessionalSkill, x, y, w float64) float64 {
+func (s *CVPDFService) drawSkillsList(pdf *fpdf.Fpdf, skills []models.ProfessionalSkill, x, y, w, maxY float64, startIdx int) (float64, int, bool) {
 	lineH := 4.0
 	if len(skills) == 0 {
-		pdf.SetXY(x+2, y)
-		pdf.SetFont("Helvetica", "", 7.5)
-		setCV_Black(pdf)
-		pdf.CellFormat(w-2, lineH, "- [Insert skills]", "", 1, "L", false, 0, "")
-		return y + lineH
+		if startIdx > 0 {
+			return y, 0, true
+		}
+		nextY := s.drawWrappedLines(pdf, x+2, y, w-2, lineH, "- [Insert skills]", maxY)
+		if nextY < 0 {
+			return y, 0, false
+		}
+		return nextY, 0, true
 	}
-	for _, skill := range skills {
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	for i := startIdx; i < len(skills); i++ {
+		skill := skills[i]
 		label := skill.Skill
 		if label == "" {
 			label = "[Insert skills]"
 		}
-		pdf.SetXY(x+2, y)
 		pdf.SetFont("Helvetica", "B", 7.5)
 		setCV_Black(pdf)
-		pdf.CellFormat(w-2, lineH, "- "+label+":", "", 1, "L", false, 0, "")
-		y += lineH
+		nextY := s.drawWrappedLines(pdf, x+2, y, w-2, lineH, "- "+label+":", maxY)
+		if nextY < 0 {
+			// If the page is still mostly empty, skip this oversized item to avoid a hang.
+			if y < maxY-40 {
+				continue
+			}
+			return y, i, false
+		}
+		y = nextY
+
 		details := skill.Details
 		if len(details) == 0 {
 			details = []string{"[skill detail point if necessary]"}
@@ -408,16 +603,18 @@ func (s *CVPDFService) drawSkillsList(pdf *fpdf.Fpdf, skills []models.Profession
 			if strings.TrimSpace(d) == "" {
 				continue
 			}
-			pdf.SetXY(x+7, y)
 			pdf.SetFont("Helvetica", "", 7.5)
-			pdf.CellFormat(w-7, lineH, "* "+d, "", 1, "L", false, 0, "")
-			y += lineH
+			nextY = s.drawWrappedLines(pdf, x+7, y, w-7, lineH, "* "+d, maxY)
+			if nextY < 0 {
+				return y, i, false
+			}
+			y = nextY
 		}
 	}
-	return y
+	return y, len(skills), true
 }
 
-func (s *CVPDFService) drawBulletList(pdf *fpdf.Fpdf, items []string, placeholder string, x, y, w float64) float64 {
+func (s *CVPDFService) drawBulletList(pdf *fpdf.Fpdf, items []string, placeholder string, x, y, w, maxY float64, startIdx int) (float64, int, bool) {
 	lineH := 4.0
 	pdf.SetFont("Helvetica", "", 7.5)
 	setCV_Black(pdf)
@@ -429,13 +626,42 @@ func (s *CVPDFService) drawBulletList(pdf *fpdf.Fpdf, items []string, placeholde
 		}
 	}
 	if len(nonEmpty) == 0 {
-		pdf.SetXY(x+2, y)
-		pdf.CellFormat(w-2, lineH, "- "+placeholder, "", 1, "L", false, 0, "")
-		return y + lineH
+		if startIdx > 0 {
+			return y, 0, true
+		}
+		nextY := s.drawWrappedLines(pdf, x+2, y, w-2, lineH, "- "+placeholder, maxY)
+		if nextY < 0 {
+			return y, 0, false
+		}
+		return nextY, 0, true
 	}
-	for _, item := range nonEmpty {
-		pdf.SetXY(x+2, y)
-		pdf.CellFormat(w-2, lineH, "- "+item, "", 1, "L", false, 0, "")
+	if startIdx < 0 {
+		startIdx = 0
+	}
+	for i := startIdx; i < len(nonEmpty); i++ {
+		nextY := s.drawWrappedLines(pdf, x+2, y, w-2, lineH, "- "+nonEmpty[i], maxY)
+		if nextY < 0 {
+			if y < maxY-40 {
+				continue
+			}
+			return y, i, false
+		}
+		y = nextY
+	}
+	return y, len(nonEmpty), true
+}
+
+func (s *CVPDFService) drawWrappedLines(pdf *fpdf.Fpdf, x, y, w, lineH float64, text string, maxY float64) float64 {
+	lines := pdf.SplitText(pdfSafeText(text), w)
+	if len(lines) == 0 {
+		return y
+	}
+	for _, line := range lines {
+		if y+lineH > maxY {
+			return -1
+		}
+		pdf.SetXY(x, y)
+		pdf.CellFormat(w, lineH, line, "", 1, "L", false, 0, "")
 		y += lineH
 	}
 	return y
@@ -465,7 +691,8 @@ func downloadImage(rawURL string) ([]byte, string, error) {
 		return data, imageTypeFromSource(rawURL, contentType), nil
 	}
 
-	resp, err := http.Get(rawURL)
+	client := &http.Client{Timeout: 8 * time.Second}
+	resp, err := client.Get(rawURL)
 	if err != nil {
 		return nil, "", err
 	}
@@ -473,7 +700,7 @@ func downloadImage(rawURL string) ([]byte, string, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, "", fmt.Errorf("HTTP %d fetching image", resp.StatusCode)
 	}
-	data, err := io.ReadAll(resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
 	if err != nil {
 		return nil, "", err
 	}
@@ -492,6 +719,84 @@ func imageTypeFromSource(rawURL, contentType string) string {
 		return "PNG"
 	}
 	return "JPEG"
+}
+
+// pdfSafeText maps text to WinAnsi/Latin-1 so gofpdf Helvetica does not panic on
+// Unicode code points (e.g. curly apostrophe U+2019 -> index out of range).
+func pdfSafeText(s string) string {
+	if s == "" {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch r {
+		case '\n', '\r', '\t':
+			b.WriteRune(r)
+		case '\u00a0':
+			b.WriteByte(' ')
+		case '\u2018', '\u2019', '\u201a', '\u2032', '`', '´':
+			b.WriteByte('\'')
+		case '\u201c', '\u201d', '\u201e', '\u201f', '\u2033':
+			b.WriteByte('"')
+		case '\u2013', '\u2014', '\u2212':
+			b.WriteByte('-')
+		case '\u2026':
+			b.WriteString("...")
+		case '\u2022', '\u25cf', '\u25aa', '\u25e6', '\u00b7', '\u2043':
+			b.WriteByte('-')
+		default:
+			if r < 32 {
+				continue
+			}
+			if r > 255 {
+				b.WriteByte('?')
+				continue
+			}
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+func pdfSafeProfile(p *models.CVProfile) {
+	if p == nil {
+		return
+	}
+	p.FirstName = pdfSafeText(p.FirstName)
+	p.LastName = pdfSafeText(p.LastName)
+	p.Gender = pdfSafeText(p.Gender)
+	p.Nationality = pdfSafeText(p.Nationality)
+	p.DateOfBirth = pdfSafeText(p.DateOfBirth)
+	p.ProfileText = pdfSafeText(p.ProfileText)
+	p.ValueProposition = pdfSafeText(p.ValueProposition)
+	for i := range p.ProfessionalSkills {
+		p.ProfessionalSkills[i].Skill = pdfSafeText(p.ProfessionalSkills[i].Skill)
+		for j := range p.ProfessionalSkills[i].Details {
+			p.ProfessionalSkills[i].Details[j] = pdfSafeText(p.ProfessionalSkills[i].Details[j])
+		}
+	}
+	for i := range p.Qualifications {
+		p.Qualifications[i] = pdfSafeText(p.Qualifications[i])
+	}
+	for i := range p.ComputerSkills {
+		p.ComputerSkills[i] = pdfSafeText(p.ComputerSkills[i])
+	}
+	for i := range p.ProfessionalMemberships {
+		p.ProfessionalMemberships[i] = pdfSafeText(p.ProfessionalMemberships[i])
+	}
+	for i := range p.Languages {
+		p.Languages[i] = pdfSafeText(p.Languages[i])
+	}
+	for i := range p.Experience {
+		p.Experience[i].Company = pdfSafeText(p.Experience[i].Company)
+		p.Experience[i].Position = pdfSafeText(p.Experience[i].Position)
+		p.Experience[i].PeriodStart = pdfSafeText(p.Experience[i].PeriodStart)
+		p.Experience[i].PeriodEnd = pdfSafeText(p.Experience[i].PeriodEnd)
+		for j := range p.Experience[i].ScopeOfWork {
+			p.Experience[i].ScopeOfWork[j] = pdfSafeText(p.Experience[i].ScopeOfWork[j])
+		}
+	}
 }
 
 func formatCVDate(s string) string {

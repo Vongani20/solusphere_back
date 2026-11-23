@@ -22,9 +22,6 @@ func TestBuildLocalRFPTemplateFromSample(t *testing.T) {
 	if tmpl.Solution.Summary == "" {
 		t.Fatal("expected a solution idea")
 	}
-	if len(tmpl.Requirements) > 0 && len(tmpl.Solution.Responses) == 0 {
-		t.Fatal("expected a proposal response for each requirement")
-	}
 	doc := &models.RFPDocument{Template: tmpl, Sources: []models.RFPSource{{Name: "sample.txt"}}}
 	out, err := RenderRFPDocx(doc)
 	if err != nil || len(out) < 1000 || string(out[:2]) != "PK" {

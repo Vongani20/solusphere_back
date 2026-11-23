@@ -78,18 +78,20 @@ func PublishSMS(phoneNumber, message string) error {
 	if SNSClient == nil {
 		return fmt.Errorf("SNS client not initialized")
 	}
-	if strings.TrimSpace(phoneNumber) == "" {
+	normalized := NormalizePhoneE164(phoneNumber, "27")
+	if normalized == "" {
 		return fmt.Errorf("phone number is required")
 	}
 
 	_, err := SNSClient.Publish(context.Background(), &sns.PublishInput{
-		PhoneNumber: aws.String(phoneNumber),
+		PhoneNumber: aws.String(normalized),
 		Message:     aws.String(message),
 	})
 	if err != nil {
-		return fmt.Errorf("failed to publish SMS with SNS: %w", err)
+		return fmt.Errorf("failed to publish SMS to %s with SNS: %w", normalized, err)
 	}
 
+	log.Printf("SNS SMS published to %s", normalized)
 	return nil
 }
 
@@ -159,7 +161,10 @@ func DownloadFromS3(key string) ([]byte, string, error) {
 		return nil, "", fmt.Errorf("S3 key is required")
 	}
 
-	out, err := S3Client.GetObject(context.Background(), &s3.GetObjectInput{
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+
+	out, err := S3Client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(BucketName),
 		Key:    aws.String(key),
 	})
@@ -168,7 +173,7 @@ func DownloadFromS3(key string) ([]byte, string, error) {
 	}
 	defer out.Body.Close()
 
-	data, err := io.ReadAll(out.Body)
+	data, err := io.ReadAll(io.LimitReader(out.Body, 8<<20))
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to read S3 object body: %w", err)
 	}

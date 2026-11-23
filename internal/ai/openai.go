@@ -23,13 +23,31 @@ type Message struct {
 	Content string
 }
 
+// ImageInput is an image passed to a multimodal Responses API call.
+// ImageURL should be a data URL (data:image/...;base64,...) or a publicly reachable URL.
+type ImageInput struct {
+	ImageURL string
+	Detail   string
+}
+
+// FileInput is a document (PDF, etc.) passed to the Responses API as input_file.
+// FileData should be a data URL (data:application/pdf;base64,...) or similar.
+type FileInput struct {
+	Filename string
+	FileData string
+}
+
 type GenerateTextRequest struct {
 	SystemPrompt    string
 	UserPrompt      string
 	Messages        []Message
+	Images          []ImageInput
+	Files           []FileInput
 	MaxOutputTokens int
 	Temperature     float64
 	WebSearch       bool
+	// Model overrides the client default when set (e.g. a faster vision model).
+	Model string
 }
 
 type OpenAIClient struct {
@@ -63,7 +81,7 @@ func NewOpenAIClient(apiKey, model string) (*OpenAIClient, error) {
 	model = NormalizeOpenAIModel(model)
 
 	client := resty.New().
-		SetTimeout(60 * time.Second).
+		SetTimeout(120 * time.Second).
 		SetRetryCount(2).
 		SetRetryWaitTime(500 * time.Millisecond).
 		SetRetryMaxWaitTime(3 * time.Second)
@@ -168,8 +186,15 @@ func (c *OpenAIClient) GenerateTextResult(ctx context.Context, req GenerateTextR
 		maxTokens = 16
 	}
 
+	model := strings.TrimSpace(req.Model)
+	if model == "" {
+		model = c.model
+	} else {
+		model = NormalizeOpenAIModel(model)
+	}
+
 	payload := map[string]interface{}{
-		"model":             c.model,
+		"model":             model,
 		"input":             buildInput(req),
 		"max_output_tokens": maxTokens,
 	}
@@ -216,35 +241,135 @@ func (c *OpenAIClient) GenerateTextResult(ctx context.Context, req GenerateTextR
 	return GenerateTextResult{
 		Text:      text,
 		Citations: extractCitations(result),
-		Model:     c.model,
+		Model:     model,
 	}, nil
 }
 
-func buildInput(req GenerateTextRequest) []map[string]string {
+func buildInput(req GenerateTextRequest) []map[string]interface{} {
 	messages := req.Messages
 	if len(messages) == 0 {
 		messages = []Message{{Role: "user", Content: req.UserPrompt}}
 	}
 
-	input := make([]map[string]string, 0, len(messages))
-	for _, msg := range messages {
+	input := make([]map[string]interface{}, 0, len(messages))
+	for i, msg := range messages {
 		content := strings.TrimSpace(msg.Content)
-		if content == "" {
+		role := normalizeRole(msg.Role)
+		isLastUser := i == len(messages)-1 && role == "user"
+		images := []ImageInput(nil)
+		files := []FileInput(nil)
+		if isLastUser {
+			images = req.Images
+			files = req.Files
+		}
+
+		if content == "" && len(images) == 0 && len(files) == 0 {
 			continue
 		}
 
-		role := normalizeRole(msg.Role)
-		input = append(input, map[string]string{
+		if len(images) == 0 && len(files) == 0 {
+			input = append(input, map[string]interface{}{
+				"role":    role,
+				"content": content,
+			})
+			continue
+		}
+
+		parts := make([]map[string]interface{}, 0, 1+len(images)+len(files))
+		if content != "" {
+			parts = append(parts, map[string]interface{}{
+				"type": "input_text",
+				"text": content,
+			})
+		}
+		for _, file := range files {
+			dataURL := strings.TrimSpace(file.FileData)
+			if dataURL == "" {
+				continue
+			}
+			filename := strings.TrimSpace(file.Filename)
+			if filename == "" {
+				filename = "document.pdf"
+			}
+			parts = append(parts, map[string]interface{}{
+				"type":      "input_file",
+				"filename":  filename,
+				"file_data": dataURL,
+			})
+		}
+		for _, img := range images {
+			url := strings.TrimSpace(img.ImageURL)
+			if url == "" {
+				continue
+			}
+			detail := strings.TrimSpace(img.Detail)
+			if detail == "" {
+				detail = "auto"
+			}
+			parts = append(parts, map[string]interface{}{
+				"type":      "input_image",
+				"image_url": url,
+				"detail":    detail,
+			})
+		}
+		if len(parts) == 0 {
+			continue
+		}
+		input = append(input, map[string]interface{}{
 			"role":    role,
-			"content": content,
+			"content": parts,
 		})
 	}
 
 	if len(input) == 0 {
-		input = append(input, map[string]string{
-			"role":    "user",
-			"content": req.UserPrompt,
-		})
+		prompt := strings.TrimSpace(req.UserPrompt)
+		if prompt == "" {
+			prompt = "Describe the attached file(s)."
+		}
+		if len(req.Images) == 0 && len(req.Files) == 0 {
+			input = append(input, map[string]interface{}{
+				"role":    "user",
+				"content": prompt,
+			})
+		} else {
+			parts := []map[string]interface{}{
+				{"type": "input_text", "text": prompt},
+			}
+			for _, file := range req.Files {
+				dataURL := strings.TrimSpace(file.FileData)
+				if dataURL == "" {
+					continue
+				}
+				filename := strings.TrimSpace(file.Filename)
+				if filename == "" {
+					filename = "document.pdf"
+				}
+				parts = append(parts, map[string]interface{}{
+					"type":      "input_file",
+					"filename":  filename,
+					"file_data": dataURL,
+				})
+			}
+			for _, img := range req.Images {
+				url := strings.TrimSpace(img.ImageURL)
+				if url == "" {
+					continue
+				}
+				detail := strings.TrimSpace(img.Detail)
+				if detail == "" {
+					detail = "auto"
+				}
+				parts = append(parts, map[string]interface{}{
+					"type":      "input_image",
+					"image_url": url,
+					"detail":    detail,
+				})
+			}
+			input = append(input, map[string]interface{}{
+				"role":    "user",
+				"content": parts,
+			})
+		}
 	}
 
 	return input

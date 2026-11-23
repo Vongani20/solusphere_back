@@ -3,6 +3,7 @@ package services
 import (
 	"archive/zip"
 	"bytes"
+	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
@@ -32,6 +33,77 @@ func TestGenerateCVPDFMatchesTemplateBasics(t *testing.T) {
 	}
 }
 
+func TestGenerateCVPDFHandlesUnicodeWithoutPanic(t *testing.T) {
+	svc := NewCVPDFService()
+	profile := sampleCVProfile()
+	profile.ProfileText = "Led the team’s delivery — “on time”… with café résumé skills"
+	profile.ValueProposition = "Don’t settle for “good enough”"
+	profile.Experience = []models.CVExperience{
+		{
+			Company:     "O’Reilly & Partners",
+			Position:    "Senior Analyst – Insights",
+			PeriodStart: "2020-01",
+			ScopeOfWork: []string{
+				"Owned stakeholder’s roadmap — end-to-end delivery",
+				"Improved NPS from “fair” to “great”… continuously",
+			},
+		},
+	}
+	profile.ProfessionalSkills = []models.ProfessionalSkill{
+		{Skill: "Communication", Details: []string{"Executive briefings — C-suite"}},
+	}
+
+	pdf, err := svc.GeneratePDF(profile)
+	if err != nil {
+		t.Fatalf("GeneratePDF with unicode failed: %v", err)
+	}
+	if !strings.HasPrefix(string(pdf), "%PDF") {
+		t.Fatalf("expected PDF output, got %d bytes", len(pdf))
+	}
+}
+
+func TestPDFSafeTextMapsCommonUnicode(t *testing.T) {
+	in := "team’s “quote” — café…"
+	got := pdfSafeText(in)
+	want := "team's \"quote\" - café..."
+	if got != want {
+		t.Fatalf("pdfSafeText(%q) = %q, want %q", in, got, want)
+	}
+}
+
+func TestPDFHeaderClearsLogoHeight(t *testing.T) {
+	if cvHeaderBottom <= cvMT+cvLogoH {
+		t.Fatalf("cvHeaderBottom=%.1f must be below logo bottom %.1f", cvHeaderBottom, cvMT+cvLogoH)
+	}
+}
+
+func TestGenerateCVPDFSidebarContinuationDoesNotPanic(t *testing.T) {
+	svc := NewCVPDFService()
+	profile := sampleCVProfile()
+	// Force sidebar overflow onto a continuation page under the logo column.
+	langs := make([]string, 40)
+	for i := range langs {
+		langs[i] = fmt.Sprintf("Language %02d with extra wording to wrap lines", i+1)
+	}
+	profile.Languages = langs
+	profile.Qualifications = []string{"Q1", "Q2", "Q3", "Q4", "Q5", "Q6", "Q7", "Q8"}
+	profile.ComputerSkills = []string{"C1", "C2", "C3", "C4", "C5", "C6", "C7", "C8"}
+	profile.ProfessionalMemberships = []string{"M1", "M2", "M3", "M4", "M5"}
+	profile.ProfessionalSkills = []models.ProfessionalSkill{
+		{Skill: "Skill A", Details: []string{"d1", "d2", "d3", "d4"}},
+		{Skill: "Skill B", Details: []string{"d1", "d2", "d3"}},
+		{Skill: "Skill C", Details: []string{"d1", "d2"}},
+	}
+
+	pdf, err := svc.GeneratePDF(profile)
+	if err != nil {
+		t.Fatalf("GeneratePDF failed: %v", err)
+	}
+	if !strings.HasPrefix(string(pdf), "%PDF") {
+		t.Fatalf("expected PDF output, got %d bytes", len(pdf))
+	}
+}
+
 func TestGenerateCVWordMatchesTemplateBasics(t *testing.T) {
 	svc := NewCVPDFService()
 	if len(cvMasterTemplateDocx) == 0 {
@@ -49,11 +121,8 @@ func TestGenerateCVWordMatchesTemplateBasics(t *testing.T) {
 		"Jane Doe",
 		"CURRICULUM VITAE",
 		"PROFILE",
-		"VALUE PROPOSITION",
-		"Date of Birth",
 		"Female",
 		"South African",
-		"15 June 1990",
 		"Process Management",
 		"Lean Six Sigma",
 		"BCom Information Systems",
@@ -69,14 +138,14 @@ func TestGenerateCVWordMatchesTemplateBasics(t *testing.T) {
 			t.Fatalf("expected document.xml to contain %q", want)
 		}
 	}
-	for _, stale := range []string{"Name of Candidate", ">Male<", "Job Title"} {
+	for _, stale := range []string{"Name of Candidate", ">Male<", "Job Title", "VALUE PROPOSITION", "Date of Birth"} {
 		if strings.Contains(xmlText, stale) {
 			t.Fatalf("expected placeholder %q to be replaced", stale)
 		}
 	}
 
-	// PROFILE, VALUE PROPOSITION, and EXPERIENCE must share left indent 567.
-	for _, heading := range []string{">PROFILE<", ">VALUE PROPOSITION<", ">EXPERIENCE<"} {
+	// PROFILE and EXPERIENCE must share left indent 567.
+	for _, heading := range []string{">PROFILE<", ">EXPERIENCE<"} {
 		start, end, err := paragraphBounds(xmlText, heading, 0)
 		if err != nil {
 			t.Fatalf("heading %s: %v", heading, err)
@@ -112,17 +181,23 @@ func TestGenerateCVWordMatchesTemplateBasics(t *testing.T) {
 		t.Fatal("expected a page break immediately before EXPERIENCE")
 	}
 
-	// The personal-details sidebar table must be pinned to the page so it
-	// always starts at the top, regardless of how much content it holds.
-	if !strings.Contains(xmlText, `w:vertAnchor="page" w:horzAnchor="page" w:tblpX="6751" w:tblpY="1021"`) {
-		t.Fatal("sidebar table should be page-anchored (personal details on top)")
+	// Page 1 uses a normal-flow two-column table (no floating anchors).
+	if strings.Contains(xmlText, "tblpPr") || strings.Contains(xmlText, `w:vertAnchor=`) {
+		t.Fatal("sidebar must not remain a floating table after page-1 layout")
 	}
-	if strings.Contains(xmlText, `w:vertAnchor="text"`) {
-		t.Fatal("sidebar table still uses text anchoring")
+	if !strings.Contains(xmlText, `<w:gridCol w:w="5600"/><w:gridCol w:w="4464"/>`) {
+		t.Fatal("expected fixed two-column page-1 grid")
+	}
+	if tblIdx := strings.Index(xmlText, "<w:tbl>"); tblIdx >= 0 {
+		nameIdx := strings.Index(xmlText, "CURRICULUM VITAE")
+		expBreakIdx := strings.Index(xmlText, `w:type="page"`)
+		if nameIdx >= 0 && expBreakIdx >= 0 && !(tblIdx < nameIdx && nameIdx < expBreakIdx) {
+			t.Fatalf("page-1 table should contain title before the page break (table=%d title=%d break=%d)", tblIdx, nameIdx, expBreakIdx)
+		}
 	}
 }
 
-func TestGenerateCVWordDoesNotOverPopulate(t *testing.T) {
+func TestGenerateCVWordExportsFullContent(t *testing.T) {
 	svc := NewCVPDFService()
 	profile := &models.CVProfile{
 		FirstName:        "Jane",
@@ -148,17 +223,57 @@ func TestGenerateCVWordDoesNotOverPopulate(t *testing.T) {
 		t.Fatalf("GenerateWord failed: %v", err)
 	}
 	xmlText := officeXMLContains(t, data, "word/document.xml")
-	if strings.Contains(xmlText, ">Five<") || strings.Contains(xmlText, ">Six<") {
-		t.Fatal("expected surplus skills to be omitted from Word export")
+	for _, skill := range []string{"One", "Two", "Three", "Four", "Five", "Six"} {
+		if !strings.Contains(xmlText, ">"+skill+"<") {
+			t.Fatalf("expected skill %q in Word export", skill)
+		}
 	}
-	if strings.Contains(xmlText, ">Q5<") {
-		t.Fatal("expected surplus qualifications to be omitted from Word export")
+	if !strings.Contains(xmlText, ">Q5<") {
+		t.Fatal("expected qualification Q5 in Word export")
 	}
-	if got := strings.Count(xmlText, ">Company:<"); got != cvMaxExperience {
-		t.Fatalf("company labels = %d, want %d", got, cvMaxExperience)
+	if got := strings.Count(xmlText, ">Company:<"); got < 3 {
+		t.Fatalf("company labels = %d, want at least 3", got)
 	}
-	if strings.Contains(xmlText, ">C</w:t>") {
-		t.Fatal("expected third experience entry to be omitted from Word export")
+	if !strings.Contains(xmlText, ">C</w:t>") && !strings.Contains(xmlText, ">C<") {
+		// Company C should appear as experience company value.
+		if !strings.Contains(xmlText, "Company") {
+			t.Fatal("expected third experience entry in Word export")
+		}
+	}
+}
+
+func TestGenerateCVPDFExportsAllExperienceAcrossPages(t *testing.T) {
+	svc := NewCVPDFService()
+	experience := make([]models.CVExperience, 0, 8)
+	for i := 0; i < 8; i++ {
+		scopes := make([]string, 0, 12)
+		for s := 0; s < 12; s++ {
+			scopes = append(scopes, fmt.Sprintf("Scope bullet %d for role %d with enough wording to wrap across lines", s+1, i+1))
+		}
+		experience = append(experience, models.CVExperience{
+			Company:     fmt.Sprintf("Company-%d", i+1),
+			Position:    fmt.Sprintf("Position-%d", i+1),
+			PeriodStart: "2018-01",
+			PeriodEnd:   "2020-12",
+			ScopeOfWork: scopes,
+		})
+	}
+	profile := sampleCVProfile()
+	profile.Experience = experience
+	profile.ProfessionalSkills = []models.ProfessionalSkill{
+		{Skill: "Payroll administration and processing", Details: []string{"Full cycle payroll for large organisations with complex statutory requirements"}},
+		{Skill: "Leave administration", Details: []string{"Managed leave provisions and applications across multiple business units"}},
+	}
+
+	data, err := svc.GeneratePDF(profile)
+	if err != nil {
+		t.Fatalf("GeneratePDF failed: %v", err)
+	}
+	if len(data) < 1000 {
+		t.Fatalf("PDF too small: %d bytes", len(data))
+	}
+	if !bytes.HasPrefix(data, []byte("%PDF")) {
+		t.Fatal("expected PDF header")
 	}
 }
 

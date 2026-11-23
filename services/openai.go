@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -71,12 +72,25 @@ func GetBPOResponse(userMessage string) (string, error) {
 	})
 }
 
-func GetAgentResponse(userMessage string, webSearch bool) (*AgentResponse, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 75*time.Second)
+func GetAgentResponse(userMessage string, webSearch bool, images []ai.ImageInput) (*AgentResponse, error) {
+	timeout := 75 * time.Second
+	maxTokens := 1200
+	temperature := 0.3
+	if len(images) > 0 {
+		timeout = 120 * time.Second
+		maxTokens = 2500
+		temperature = 0.1
+		// Prefer high-detail vision so small/printed text is readable.
+		for i := range images {
+			if strings.TrimSpace(images[i].Detail) == "" || images[i].Detail == "auto" {
+				images[i].Detail = "high"
+			}
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
-	result, err := ai.GenerateTextResultWithDefault(ctx, ai.GenerateTextRequest{
-		SystemPrompt: `You are SIA, Solusphere's AI operations and analytics agent.
+	systemPrompt := `You are SIA, Solusphere's AI operations and analytics agent.
 Answer with accuracy, practical reasoning, and clear uncertainty.
 When web search is available and the question may depend on current public information, search the web before answering.
 Research must be based on multiple independent sources whenever available.
@@ -86,10 +100,20 @@ Do not rely on a single source for a research answer unless only one credible so
 Compare sources when they disagree and explain which source is most authoritative for each claim.
 For website analysis, inspect and summarize the public facts you can verify, then give actionable recommendations.
 For analytics questions, structure the answer with findings, likely drivers, risks, and next actions.
-Do not invent facts, metrics, prices, policies, or source claims. Cite web sources when you use them.`,
+When images are attached:
+1) First carefully read ALL visible text in the image(s) (OCR). Transcribe important wording accurately — do not paraphrase numbers, names, dates, totals, labels, or table cells.
+2) Base your analysis and conclusions on the text and values actually shown in the image.
+3) If text is blurry or unreadable, say exactly what is unclear instead of guessing.
+4) Prefer quoting key lines from the image before interpreting them.
+5) Do not invent content that is not visible in the image.
+Do not invent facts, metrics, prices, policies, or source claims. Cite web sources when you use them.`
+
+	result, err := ai.GenerateTextResultWithDefault(ctx, ai.GenerateTextRequest{
+		SystemPrompt:    systemPrompt,
 		UserPrompt:      userMessage,
-		MaxOutputTokens: 1200,
-		Temperature:     0.3,
+		Images:          images,
+		MaxOutputTokens: maxTokens,
+		Temperature:     temperature,
 		WebSearch:       webSearch,
 	})
 	if err != nil {

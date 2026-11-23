@@ -13,14 +13,16 @@ import (
 	"image/png"
 	"io"
 	"log"
+	"strconv"
 	"strings"
 
 	"solusphere_backend/models"
 )
 
-// The SoluGrowth CV Master Template (docs/CV Master Template.docx). The Word
-// download fills this template in place so the output matches the official
-// branded layout exactly (header logo, icons, table layout, footer).
+// The SoluGrowth CV Master Template, kept in sync with
+// docs/CV Master Template.docx. The Word download fills this template in place
+// so the output matches the official branded layout exactly (header logo,
+// icons, table layout, footer).
 //
 //go:embed assets/cv_master_template.docx
 var cvMasterTemplateDocx []byte
@@ -34,7 +36,8 @@ func (s *CVPDFService) GenerateWord(profile *models.CVProfile) ([]byte, error) {
 	if profile == nil {
 		return nil, fmt.Errorf("profile is required")
 	}
-	profile = FitCVProfileForTemplate(profile)
+	models.SanitizeCVProfile(profile)
+	// Keep full CV content in Word export as well.
 
 	reader, err := zip.NewReader(bytes.NewReader(cvMasterTemplateDocx), int64(len(cvMasterTemplateDocx)))
 	if err != nil {
@@ -112,7 +115,10 @@ func (s *CVPDFService) GenerateWord(profile *models.CVProfile) ([]byte, error) {
 // the top) can never be hijacked by user-provided text that happens to equal
 // a template placeholder.
 func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
-	doc = pinCVSidebarTable(doc)
+	// Compact the left column early (before fills rewrite PROFILE). Floating
+	// sidebar positioning is discarded later — page 1 becomes a normal-flow
+	// two-column table so Word cannot push PROFILE onto page 2.
+	doc = compactCVPage1LeftColumn(doc)
 
 	// Item paragraph templates, extracted from the pristine document.
 	bulletTemplate, err := extractParagraph(doc, ">Microsoft Office<")
@@ -142,9 +148,9 @@ func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
 		return "", err
 	}
 
-	// ---- Profile + value proposition (left column, page 1) ----
-	// PROFILE / VALUE PROPOSITION stay on page 1; EXPERIENCE follows a page
-	// break so it always starts on page 2. All three share left indent 567.
+	// ---- Profile (left column, page 1) ----
+	// PROFILE stays on page 1; EXPERIENCE follows a page break so it always
+	// starts on page 2. Both share left indent 567.
 	_, headEnd, err := paragraphBounds(doc, ">PROFILE<", 0)
 	if err != nil {
 		return "", err
@@ -157,10 +163,6 @@ func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	headingPara, err := extractParagraph(doc, ">PROFILE<")
-	if err != nil {
-		return "", err
-	}
 	alignedBody, err := cvAlignedBodyParagraph(doc, bodyStart, expStart)
 	if err != nil {
 		return "", err
@@ -168,13 +170,10 @@ func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
 
 	profilePara := injectRunBeforeClose(alignedBody,
 		cvBodyRun(orCVPlaceholder(profile.ProfileText, "[Insert profile]")))
-	vpHeading := stripParaIDs(strings.Replace(headingPara, ">PROFILE<", ">VALUE PROPOSITION<", 1))
-	vpPara := stripParaIDs(injectRunBeforeClose(alignedBody,
-		cvBodyRun(orCVPlaceholder(profile.ValueProposition, "[Insert value proposition]"))))
 	// Keep EXPERIENCE on page 2 (master template has a page break here; the
-	// profile/VP rewrite must re-insert it because that zone is replaced).
+	// profile rewrite must re-insert it because that zone is replaced).
 	pageBreak := cvExperiencePageBreak(doc, bodyStart, expStart)
-	doc = doc[:bodyStart] + profilePara + vpHeading + vpPara + pageBreak + doc[expStart:]
+	doc = doc[:bodyStart] + profilePara + pageBreak + doc[expStart:]
 
 	// ---- Candidate name ----
 	name := strings.TrimSpace(profile.FirstName + " " + profile.LastName)
@@ -243,36 +242,395 @@ func fillCVDocumentXML(doc string, profile *models.CVProfile) (string, error) {
 		return "", err
 	}
 
-	// ---- Personal details: nationality + date of birth ----
+	// ---- Personal details: nationality ----
 	natStart, natEnd, err := paragraphBounds(doc, "Nationality:", 0)
 	if err != nil {
 		return "", err
 	}
 	natPara := strings.Replace(doc[natStart:natEnd], ">South African<",
 		">"+xmlEscapeCV(orCVPlaceholder(profile.Nationality, "[Insert nationality]"))+"<", 1)
-	dobPara := strings.Replace(natPara, ">Nationality:<", ">Date of Birth:<", 1)
-	dobPara = replaceLastRunText(dobPara, xmlEscapeCV(orCVPlaceholder(formatCVDate(profile.DateOfBirth), "dd Month yyyy")))
-	doc = doc[:natStart] + natPara + stripParaIDs(dobPara) + doc[natEnd:]
+	doc = doc[:natStart] + natPara + doc[natEnd:]
 
 	// ---- Personal details: gender (value split across two runs: "M"+"ale") ----
-	return replaceWithinParagraph(doc, "Gender:", func(para string) string {
+	doc, err = replaceWithinParagraph(doc, "Gender:", func(para string) string {
 		gender := xmlEscapeCV(orCVPlaceholder(profile.Gender, "[Insert gender]"))
 		para = strings.Replace(para, ">M</w:t>", ">"+gender+"</w:t>", 1)
 		para = strings.Replace(para, ">ale</w:t>", "></w:t>", 1)
 		return para
 	})
+	if err != nil {
+		return "", err
+	}
+
+	// Word ignores/mis-paginates tall floating sidebars. Rebuild page 1 as one
+	// normal-flow two-column table (PROFILE | PERSONAL DETAILS) before EXPERIENCE.
+	return layoutCVPage1SideBySide(doc), nil
 }
 
-// pinCVSidebarTable anchors the personal-details sidebar table to the page
-// instead of the text flow. With the template's text anchoring, a sidebar tall
-// enough not to fit below its anchor point gets pushed down the page (or onto
-// page 2), so PERSONAL DETAILS no longer starts at the top. Page anchoring
-// at the document's top margin (1021 twips) keeps Personal Details above the
-// other sidebar sections; overflowing rows continue on the next page.
+// layoutCVPage1SideBySide replaces the master template's floating sidebar +
+// in-flow left column with a single non-floating two-column table so name,
+// photo, PROFILE and PERSONAL DETAILS always start together on page 1.
+func layoutCVPage1SideBySide(doc string) string {
+	tblStart := strings.Index(doc, "<w:tbl>")
+	tblEnd := indexTopLevelTableEnd(doc)
+	if tblStart < 0 || tblEnd < 0 {
+		return doc
+	}
+	sidebar := stripCVFloatingTableProps(doc[tblStart:tblEnd])
+
+	nameStart, _, err := paragraphBounds(doc, "CURRICULUM VITAE", 0)
+	if err != nil {
+		return doc
+	}
+	_, profEnd, err := paragraphBounds(doc, ">PROFILE<", 0)
+	if err != nil {
+		return doc
+	}
+	_, bodyEnd, err := nextParagraphDepth(doc, profEnd)
+	if err != nil || bodyEnd <= nameStart {
+		return doc
+	}
+	brStart, _, err := paragraphBounds(doc, `w:type="page"`, 0)
+	if err != nil {
+		return doc
+	}
+	if bodyEnd > brStart {
+		bodyEnd = brStart
+	}
+	leftInner := doc[nameStart:bodyEnd]
+	if !strings.Contains(leftInner, ">PROFILE<") {
+		return doc
+	}
+	// The master template's left-column paragraphs reserve 4421 twips on the
+	// right for the original floating sidebar. In a 5600-twip table cell that
+	// leaves only a few characters of usable width, causing words to stack
+	// vertically. Remove that legacy reservation for the normal-flow cell.
+	leftInner = normalizeCVPage1LeftColumnWidth(leftInner)
+	// Keep the profile photo visible, but force top-and-bottom wrapping so it
+	// cannot squeeze PROFILE into a character-wide strip the way side-wrapping
+	// / behind-doc anchoring did inside the page-1 cell.
+	leftInner = prepareCVPage1Photo(leftInner)
+
+	bodyOpen := strings.Index(doc, "<w:body>")
+	if bodyOpen < 0 {
+		return doc
+	}
+	bodyContentStart := bodyOpen + len("<w:body>")
+	page1 := cvPage1TwoColumnTable(leftInner, sidebar)
+	return doc[:bodyContentStart] + page1 + doc[brStart:]
+}
+
+func normalizeCVPage1LeftColumnWidth(left string) string {
+	// The master template reserves the floating-sidebar width with large
+	// right indents (4421 on headings, 4678 on PROFILE body spacers). Inside a
+	// ~5600-twip table cell that leaves only a character of usable width, so
+	// PROFILE text stacks vertically. Zero every right indent in this cell.
+	var b strings.Builder
+	rest := left
+	for {
+		start := strings.Index(rest, ` w:right="`)
+		if start < 0 {
+			b.WriteString(rest)
+			break
+		}
+		end := strings.Index(rest[start+len(` w:right="`):], `"`)
+		if end < 0 {
+			b.WriteString(rest)
+			break
+		}
+		b.WriteString(rest[:start])
+		b.WriteString(` w:right="0"`)
+		rest = rest[start+len(` w:right="`)+end+1:]
+	}
+	return b.String()
+}
+
+func removeCVPage1DrawingParagraphs(content string) string {
+	var out strings.Builder
+	for pos := 0; pos < len(content); {
+		start, end, err := nextParagraphDepth(content, pos)
+		if err != nil {
+			out.WriteString(content[pos:])
+			break
+		}
+		out.WriteString(content[pos:start])
+		para := content[start:end]
+		if !strings.Contains(para, "<w:drawing>") {
+			out.WriteString(para)
+		}
+		pos = end
+	}
+	return out.String()
+}
+
+// prepareCVPage1Photo keeps the candidate photo in the left column but makes it
+// flow above PROFILE (wrapTopAndBottom) instead of overlapping or side-wrapping
+// text inside the page-1 table cell.
+func prepareCVPage1Photo(left string) string {
+	if !strings.Contains(left, "<w:drawing>") {
+		return left
+	}
+	left = strings.ReplaceAll(left, `<wp:wrapNone/>`, `<wp:wrapTopAndBottom/>`)
+	left = strings.ReplaceAll(left, `behindDoc="1"`, `behindDoc="0"`)
+	// Prefer paragraph-relative placement under the name rather than page pins.
+	left = strings.ReplaceAll(left,
+		`<wp:positionH relativeFrom="page">`,
+		`<wp:positionH relativeFrom="column">`)
+	left = strings.ReplaceAll(left,
+		`<wp:positionV relativeFrom="page">`,
+		`<wp:positionV relativeFrom="paragraph">`)
+	return left
+}
+
+// stripCVFloatingTableProps removes absolute positioning so the sidebar can sit
+// inside a normal-flow page-1 cell, and sizes it to the right-column width.
+func stripCVFloatingTableProps(tbl string) string {
+	for {
+		start := strings.Index(tbl, "<w:tblpPr")
+		if start < 0 {
+			break
+		}
+		end := strings.Index(tbl[start:], "/>")
+		if end < 0 {
+			break
+		}
+		tbl = tbl[:start] + tbl[start+end+2:]
+	}
+	tbl = strings.Replace(tbl, `<w:tblOverlap w:val="never"/>`, "", 1)
+	tbl = strings.Replace(tbl, `<w:tblOverlap w:val="overlap"/>`, "", 1)
+
+	// Sidebar retains its own borders; the outer page-1 frame is disabled in
+	// cvPage1TwoColumnTable to avoid stacked borders.
+
+	// Nested sidebar must fit the page-1 right cell (4464 twips). The master
+	// template uses auto width ~4815, which clips content and can hide the left
+	// border against the cell edge.
+	const cellW = 4464
+	const iconW = 675
+	textW := cellW - iconW
+	tbl = replaceXMLAttr(tbl, "w:tblW", "w:w", strconv.Itoa(cellW))
+	tbl = strings.Replace(tbl, `<w:tblW w:w="0" w:type="auto"/>`,
+		`<w:tblW w:w="`+strconv.Itoa(cellW)+`" w:type="dxa"/>`, 1)
+	tbl = strings.Replace(tbl,
+		`<w:gridCol w:w="675"/><w:gridCol w:w="4140"/>`,
+		`<w:gridCol w:w="`+strconv.Itoa(iconW)+`"/><w:gridCol w:w="`+strconv.Itoa(textW)+`"/>`, 1)
+	tbl = strings.ReplaceAll(tbl, `w:tcW w:w="4140"`, `w:tcW w:w="`+strconv.Itoa(textW)+`"`)
+	tbl = strings.ReplaceAll(tbl, `w:tcW w:w="4815"`, `w:tcW w:w="`+strconv.Itoa(cellW)+`"`)
+	return tbl
+}
+
+func clearCVSidebarTblBorders(tbl string) string {
+	start := strings.Index(tbl, "<w:tblBorders>")
+	if start < 0 {
+		return tbl
+	}
+	endRel := strings.Index(tbl[start:], "</w:tblBorders>")
+	if endRel < 0 {
+		return tbl
+	}
+	end := start + endRel + len("</w:tblBorders>")
+	tbl = tbl[:start] +
+		`<w:tblBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/></w:tblBorders>` +
+
+		tbl[end:]
+
+	// Some master-template sidebar sections use nested tables with tcBorders.
+	// Nilify any explicit "single" borders so we don't stack borders with the
+	// outer page-1 frame.
+	repl := []struct{ old, new string }{
+		{`w:top w:val="single"`, `w:top w:val="nil"`},
+		{`w:left w:val="single"`, `w:left w:val="nil"`},
+		{`w:bottom w:val="single"`, `w:bottom w:val="nil"`},
+		{`w:right w:val="single"`, `w:right w:val="nil"`},
+	}
+	for _, r := range repl {
+		tbl = strings.ReplaceAll(tbl, r.old, r.new)
+	}
+	return tbl
+}
+
+func replaceXMLAttr(xml, elem, attr, value string) string {
+	// Best-effort single-element attribute rewrite for compact empty tags.
+	start := strings.Index(xml, "<"+elem)
+	if start < 0 {
+		return xml
+	}
+	end := strings.Index(xml[start:], "/>")
+	if end < 0 {
+		return xml
+	}
+	tag := xml[start : start+end+2]
+	key := attr + `="`
+	if i := strings.Index(tag, key); i >= 0 {
+		j := strings.Index(tag[i+len(key):], `"`)
+		if j >= 0 {
+			tag = tag[:i+len(key)] + value + tag[i+len(key)+j:]
+		}
+	}
+	return xml[:start] + tag + xml[start+end+2:]
+}
+
+// cvPage1TwoColumnTable places the left column and sidebar side-by-side in
+// normal document flow (no floating anchors).
+func cvPage1TwoColumnTable(left, right string) string {
+	// Content width ≈ page (11907) - left margin (851) - right margin (992).
+	const total = 10064
+	const leftW = 5600
+	const rightW = total - leftW
+	// Outer page-1 border disabled: the inner sidebar table provides the
+	// visible border around PERSONAL DETAILS.
+	const sideBorder = `<w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/>`
+	return `<w:tbl><w:tblPr>` +
+		`<w:tblW w:w="` + strconv.Itoa(total) + `" w:type="dxa"/>` +
+		`<w:tblLayout w:type="fixed"/>` +
+		`<w:tblBorders>` +
+		`<w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/>` +
+		`<w:insideH w:val="nil"/><w:insideV w:val="nil"/>` +
+		`</w:tblBorders>` +
+		`</w:tblPr>` +
+		`<w:tblGrid><w:gridCol w:w="` + strconv.Itoa(leftW) + `"/><w:gridCol w:w="` + strconv.Itoa(rightW) + `"/></w:tblGrid>` +
+		`<w:tr>` +
+		`<w:tc><w:tcPr><w:tcW w:w="` + strconv.Itoa(leftW) + `" w:type="dxa"/><w:vAlign w:val="top"/>` +
+		`<w:tcBorders>` +
+		`<w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/>` +
+		`</w:tcBorders></w:tcPr>` + left + `<w:p/>` + `</w:tc>` +
+		// Draw the sidebar frame on the outer right cell so the left edge stays
+		// visible even when Word collapses nested-table borders against the cell.
+		`<w:tc><w:tcPr><w:tcW w:w="` + strconv.Itoa(rightW) + `" w:type="dxa"/><w:vAlign w:val="top"/>` +
+		`<w:tcBorders>` + sideBorder + `</w:tcBorders>` +
+		`<w:shd w:val="clear" w:color="auto" w:fill="F2F2F2"/>` +
+		`</w:tcPr>` + right + `<w:p/>` + `</w:tc>` +
+		`</w:tr></w:tbl>`
+}
+
+// indexTopLevelTableEnd returns the index after the first top-level </w:tbl>.
+func indexTopLevelTableEnd(doc string) int {
+	start := strings.Index(doc, "<w:tbl>")
+	if start < 0 {
+		return -1
+	}
+	depth := 0
+	for i := start; i < len(doc); {
+		if strings.HasPrefix(doc[i:], "<w:tbl>") {
+			depth++
+			i += len("<w:tbl>")
+			continue
+		}
+		if strings.HasPrefix(doc[i:], "</w:tbl>") {
+			depth--
+			i += len("</w:tbl>")
+			if depth == 0 {
+				return i
+			}
+			continue
+		}
+		i++
+	}
+	return -1
+}
+
+// pinCVSidebarTable is retained for tests/helpers that still inspect the
+// template's original floating anchors before side-by-side layout.
 func pinCVSidebarTable(doc string) string {
 	const floating = `w:vertAnchor="text" w:horzAnchor="page" w:tblpX="6751" w:tblpY="2572"`
 	const pinned = `w:vertAnchor="page" w:horzAnchor="page" w:tblpX="6751" w:tblpY="1021"`
 	return strings.Replace(doc, floating, pinned, 1)
+}
+
+// compactCVPage1LeftColumn removes the empty-paragraph gap the master template
+// leaves between the photo and PROFILE (legacy VALUE PROPOSITION space). That
+// gap pushes PROFILE onto a later page once the sidebar is filled.
+//
+// Paragraph ends are depth-aware so drawings/textboxes with nested <w:p> are
+// not truncated (naive </w:p> matching previously corrupted document.xml).
+func compactCVPage1LeftColumn(doc string) string {
+	profStart, _, err := paragraphBounds(doc, ">PROFILE<", 0)
+	if err != nil || profStart <= 0 {
+		return doc
+	}
+	nameStart, _, err := paragraphBounds(doc, "Name of Candidate", 0)
+	if err != nil {
+		nameStart, _, err = paragraphBounds(doc, "CURRICULUM VITAE", 0)
+		if err != nil {
+			return doc
+		}
+	}
+
+	type paraRange struct{ start, end int }
+	var paras []paraRange
+	pos := nameStart
+	for pos < profStart {
+		start, end, err := nextParagraphDepth(doc, pos)
+		if err != nil || start >= profStart {
+			break
+		}
+		paras = append(paras, paraRange{start, end})
+		pos = end
+	}
+	if len(paras) == 0 {
+		return doc
+	}
+
+	var b strings.Builder
+	b.WriteString(doc[:nameStart])
+	kept := 0
+	for _, p := range paras {
+		para := doc[p.start:p.end]
+		keep := hasVisibleText(para) ||
+			strings.Contains(para, "<w:drawing>") ||
+			strings.Contains(para, "CURRICULUM VITAE") ||
+			strings.Contains(para, "Name of Candidate")
+		if !keep {
+			continue
+		}
+		b.WriteString(para)
+		kept++
+	}
+	if kept < 2 {
+		return doc
+	}
+	b.WriteString(doc[profStart:])
+	return b.String()
+}
+
+// paragraphEndDepth returns the index after the matching </w:p> for the
+// paragraph that starts at start, counting nested <w:p> / <w:p ...> inside
+// drawings/text boxes.
+func paragraphEndDepth(doc string, start int) int {
+	depth := 0
+	for i := start; i < len(doc); {
+		if strings.HasPrefix(doc[i:], "<w:p>") || strings.HasPrefix(doc[i:], "<w:p ") {
+			depth++
+			gt := strings.IndexByte(doc[i:], '>')
+			if gt < 0 {
+				return len(doc)
+			}
+			i += gt + 1
+			continue
+		}
+		if strings.HasPrefix(doc[i:], "</w:p>") {
+			depth--
+			i += len("</w:p>")
+			if depth == 0 {
+				return i
+			}
+			continue
+		}
+		i++
+	}
+	return len(doc)
+}
+
+func nextParagraphDepth(doc string, pos int) (int, int, error) {
+	start := strings.Index(doc[pos:], "<w:p ")
+	if alt := strings.Index(doc[pos:], "<w:p>"); alt >= 0 && (start < 0 || alt < start) {
+		start = alt
+	}
+	if start < 0 {
+		return 0, 0, fmt.Errorf("CV template: no paragraph after position %d", pos)
+	}
+	start += pos
+	return start, paragraphEndDepth(doc, start), nil
 }
 
 // fillCVExperience replaces the template's two example experience blocks with
@@ -282,11 +640,12 @@ func fillCVExperience(doc string, entries []models.CVExperience) (string, error)
 	if err != nil {
 		return "", err
 	}
-	positionT, err := extractParagraph(doc, ">Position: <")
+	// Master template splits labels/values across runs ("Position" + ": " + "Job" + " Title").
+	positionT, err := extractParagraph(doc, ">Position<")
 	if err != nil {
 		return "", err
 	}
-	periodT, err := extractParagraph(doc, ">Period: <")
+	periodT, err := extractParagraph(doc, ">Period<")
 	if err != nil {
 		return "", err
 	}
@@ -297,7 +656,7 @@ func fillCVExperience(doc string, entries []models.CVExperience) (string, error)
 
 	// Spacer between period and scope heading, and the empty list paragraph
 	// used for scope-of-work lines.
-	_, periodEnd, err := paragraphBounds(doc, ">Period: <", 0)
+	_, periodEnd, err := paragraphBounds(doc, ">Period<", 0)
 	if err != nil {
 		return "", err
 	}
@@ -350,8 +709,8 @@ func fillCVExperience(doc string, entries []models.CVExperience) (string, error)
 		period := orCVPlaceholder(formatCVPeriod(exp.PeriodStart, exp.PeriodEnd), "[Month yyyy - Month yyyy]")
 
 		blocks.WriteString(stripParaIDs(strings.Replace(companyT, ">Name<", ">"+xmlEscapeCV(company)+"<", 1)))
-		blocks.WriteString(stripParaIDs(strings.Replace(positionT, ">Job Title<", ">"+xmlEscapeCV(position)+"<", 1)))
-		blocks.WriteString(stripParaIDs(strings.Replace(periodT, ">April 2025 - Current<", ">"+xmlEscapeCV(period)+"<", 1)))
+		blocks.WriteString(stripParaIDs(fillCVSplitRunValue(positionT, ">Job</w:t>", "> Title</w:t>", position)))
+		blocks.WriteString(stripParaIDs(fillCVSplitRunValue(periodT, ">April</w:t>", "> 2025 - Current</w:t>", period)))
 		blocks.WriteString(stripParaIDs(spacerT))
 		blocks.WriteString(stripParaIDs(scopeHeadT))
 
@@ -369,6 +728,14 @@ func fillCVExperience(doc string, entries []models.CVExperience) (string, error)
 	}
 
 	return doc[:blockStart] + blocks.String() + doc[rangeEnd:], nil
+}
+
+// fillCVSplitRunValue writes value into the first run marker and clears the
+// continuation run (master template often splits placeholder text across runs).
+func fillCVSplitRunValue(para, firstRunClose, contRunClose, value string) string {
+	para = strings.Replace(para, firstRunClose, ">"+xmlEscapeCV(value)+"</w:t>", 1)
+	para = strings.Replace(para, contRunClose, "></w:t>", 1)
+	return para
 }
 
 // cvExperiencePageBreak returns the template's page-break paragraph between
@@ -465,6 +832,36 @@ func cvDocxPhotoPNG(photoURL string) []byte {
 	w, h := bounds.Dx(), bounds.Dy()
 	if w <= 0 || h <= 0 {
 		return nil
+	}
+
+	// Cap decoded size so huge uploads cannot stall Word export / gateway timeouts.
+	const maxDim = 1200
+	if w > maxDim || h > maxDim {
+		scale := float64(maxDim) / float64(w)
+		if h > w {
+			scale = float64(maxDim) / float64(h)
+		}
+		nw := int(float64(w)*scale + 0.5)
+		nh := int(float64(h)*scale + 0.5)
+		if nw < 1 {
+			nw = 1
+		}
+		if nh < 1 {
+			nh = 1
+		}
+		resized := image.NewRGBA(image.Rect(0, 0, nw, nh))
+		draw.Draw(resized, resized.Bounds(), image.NewUniform(color.White), image.Point{}, draw.Src)
+		// Nearest-neighbor shrink is enough for a small CV photo frame.
+		for y := 0; y < nh; y++ {
+			sy := bounds.Min.Y + y*h/nh
+			for x := 0; x < nw; x++ {
+				sx := bounds.Min.X + x*w/nw
+				resized.Set(x, y, img.At(sx, sy))
+			}
+		}
+		img = resized
+		bounds = img.Bounds()
+		w, h = bounds.Dx(), bounds.Dy()
 	}
 
 	// Grow the canvas (never crop) so its aspect ratio matches the frame.

@@ -2,14 +2,17 @@ package services
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
+	"path/filepath"
 	"strings"
 
+	"solusphere_backend/internal/ai"
 	"solusphere_backend/models"
 )
 
 const cvImportSystemPrompt = `You are a CV/resume extraction specialist.
-Read the document text and return ONLY valid JSON matching this schema:
+Read the FULL document text and return ONLY valid JSON matching this schema:
 {
   "first_name": "string",
   "last_name": "string",
@@ -35,12 +38,100 @@ Read the document text and return ONLY valid JSON matching this schema:
 Rules:
 - Extract only facts present in the document. Do not invent employers, degrees, or dates.
 - Normalize date_of_birth to YYYY-MM-DD when possible.
-- Keep profile_text concise (max ~80 words).
-- Keep value_proposition concise (max ~120 words).
-- Prefer at most 4 professional skills (with up to 2 short details each), 4 qualifications, 4 computer skills, 3 memberships, and 4 languages.
-- Prefer the 2 most recent experience roles, with up to 4 short scope-of-work bullets each.
+- Preserve profile_text and value_proposition in full from the document — do not shorten or summarize them.
 - If a field is missing, use an empty string or empty array.
-- Include warnings for ambiguous or missing critical data.`
+- Include warnings for ambiguous or missing critical data.
+- CRITICAL: Extract EVERY work experience / role in the document, not just the first one.
+- For each role, include ALL scope-of-work / responsibility / achievement bullets as separate strings. Do not truncate lists.
+- Do not summarize multiple jobs into one entry. Preserve company, position, period, and bullets per role.
+- Prefer completeness over brevity for experience, skills, qualifications, and every free-text field.
+- Return a single JSON object only. No markdown, no commentary.`
+
+// cvImportFastModel is a vision-capable model that finishes inside CloudFront's
+// 60s origin timeout. Production default (gpt-5.4) is too slow for page OCR.
+const cvImportFastModel = "gpt-4.1-mini"
+const cvImportMaxPages = 4
+const cvImportMaxTokens = 12000
+
+// ImportCVProfileFromUpload extracts a CV profile from an uploaded document.
+// Text-based files use native extract + JSON mapping. Scanned/vectorized PDFs
+// use a single vision call (page images → JSON) to stay within proxy timeouts.
+func ImportCVProfileFromUpload(ctx context.Context, filename string, data []byte) (*models.CVProfile, []string, error) {
+	if len(data) == 0 {
+		return nil, nil, fmt.Errorf("empty document")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+
+	kind := detectCVDocumentKind(filename, data)
+	text, err := extractNativeCVText(kind, data)
+	if err == nil {
+		text = strings.TrimSpace(text)
+		if isUsefulCVText(text) {
+			return ParseCVFromDocumentText(ctx, text)
+		}
+	}
+
+	images, files, mediaErr := prepareCVImportMedia(ctx, filename, kind, data)
+	if mediaErr != nil {
+		return nil, nil, fmt.Errorf("no readable text found in document; %w", mediaErr)
+	}
+	if len(images) == 0 && len(files) == 0 {
+		return nil, nil, fmt.Errorf("no readable text found in document and OCR inputs were unavailable")
+	}
+
+	return ParseCVFromDocumentMedia(ctx, images, files)
+}
+
+func prepareCVImportMedia(ctx context.Context, filename, kind string, data []byte) ([]ai.ImageInput, []ai.FileInput, error) {
+	switch kind {
+	case "jpeg", "png", "gif", "webp":
+		mime := "image/" + kind
+		if kind == "jpeg" {
+			mime = "image/jpeg"
+		}
+		return []ai.ImageInput{{
+			ImageURL: fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(data)),
+			Detail:   "auto",
+		}}, nil, nil
+	case "pdf":
+		pages, err := renderPDFPagesToImages(ctx, data, cvImportMaxPages)
+		if err == nil && len(pages) > 0 {
+			return pages, nil, nil
+		}
+		imgs := extractPageLikeImagesFromPDF(data, 4)
+		var files []ai.FileInput
+		if len(imgs) == 0 && len(data) <= 8<<20 {
+			name := filenameBase(filename, "cv.pdf")
+			files = []ai.FileInput{{
+				Filename: name,
+				FileData: "data:application/pdf;base64," + base64.StdEncoding.EncodeToString(data),
+			}}
+		}
+		if len(imgs) == 0 && len(files) == 0 {
+			if err != nil {
+				return nil, nil, fmt.Errorf("PDF page rendering failed: %w", err)
+			}
+			return nil, nil, fmt.Errorf("PDF page rendering produced no images")
+		}
+		return imgs, files, nil
+	default:
+		name := filenameBase(filename, "document.bin")
+		return nil, []ai.FileInput{{
+			Filename: name,
+			FileData: fmt.Sprintf("data:%s;base64,%s", mimeForCVKind(kind), base64.StdEncoding.EncodeToString(data)),
+		}}, nil
+	}
+}
+
+func filenameBase(filename, fallback string) string {
+	name := filepath.Base(strings.TrimSpace(filename))
+	if name == "" || name == "." || name == string(filepath.Separator) {
+		return fallback
+	}
+	return name
+}
 
 // ParseCVFromDocumentText maps extracted document text into a CV profile draft.
 func ParseCVFromDocumentText(ctx context.Context, text string) (*models.CVProfile, []string, error) {
@@ -49,18 +140,36 @@ func ParseCVFromDocumentText(ctx context.Context, text string) (*models.CVProfil
 		return nil, nil, fmt.Errorf("document contains no readable text")
 	}
 
-	payload, err := GenerateStructuredJSON(ctx, cvImportSystemPrompt, "Extract CV data from this document:\n\n"+text, 3500)
+	userPrompt := "Extract COMPLETE CV data from this entire document. Do not skip later experience roles or scope bullets. Return one compact JSON object only — no markdown fences.\n\n" + text
+	payload, err := GenerateStructuredJSONWithMedia(ctx, cvImportSystemPrompt, userPrompt, nil, nil, cvImportMaxTokens, cvImportFastModel)
 	if err != nil {
 		return nil, nil, err
 	}
+	return profileFromImportPayload(payload, text)
+}
 
+// ParseCVFromDocumentMedia maps page images / attached files directly into a CV profile.
+func ParseCVFromDocumentMedia(ctx context.Context, images []ai.ImageInput, files []ai.FileInput) (*models.CVProfile, []string, error) {
+	userPrompt := "Read every attached CV page/image carefully and extract COMPLETE CV data as one compact JSON object. No markdown fences. Do not skip later experience roles or scope bullets."
+	payload, err := GenerateStructuredJSONWithMedia(ctx, cvImportSystemPrompt, userPrompt, images, files, cvImportMaxTokens, cvImportFastModel)
+	if err != nil {
+		return nil, nil, err
+	}
+	return profileFromImportPayload(payload, "")
+}
+
+func profileFromImportPayload(payload map[string]interface{}, sourceText string) (*models.CVProfile, []string, error) {
 	profile := mapToCVProfile(payload)
 	models.SanitizeCVProfile(profile)
-	profile = FitCVProfileForTemplate(profile)
 
 	warnings := stringListFromAny(payload["warnings"])
 	if len(profile.FirstName) == 0 && len(profile.LastName) == 0 {
 		warnings = append(warnings, "Name could not be detected — please review personal information.")
+	}
+	if len(profile.Experience) == 0 {
+		warnings = append(warnings, "No experience entries were detected — add roles manually and check the source document.")
+	} else if sourceText != "" && len(profile.Experience) == 1 && strings.Count(strings.ToLower(sourceText), "company") >= 2 {
+		warnings = append(warnings, "Only one experience entry was extracted. Review the Experience step — later roles may need to be added manually.")
 	}
 
 	return profile, warnings, nil

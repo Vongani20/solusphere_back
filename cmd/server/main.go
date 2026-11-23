@@ -448,6 +448,8 @@ func main() {
 	{
 		// User routes
 		protected.GET("/profile", handlers.Profile)
+		protected.POST("/profile/photo", handlers.UploadProfilePhoto)
+		protected.DELETE("/profile/photo", handlers.DeleteProfilePhoto)
 		protected.PATCH("/profile/birth-date", handlers.UpdateBirthDate)
 		protected.GET("/birthdays", handlers.ListBirthdays)
 		protected.PATCH("/auth/password", handlers.UpdatePassword)
@@ -488,6 +490,18 @@ func main() {
 		protected.GET("/chats/calls/:call_id/candidates", handlers.ListCallCandidates)
 		protected.GET("/chats/:user_id/messages", handlers.ListDirectMessages)
 		protected.POST("/chats/:user_id/messages", handlers.SendDirectMessage)
+		protected.GET("/chats/:user_id/typing", handlers.GetTyping)
+		protected.POST("/chats/:user_id/typing", handlers.SetTyping)
+
+		// Tasks
+		tasks := protected.Group("/tasks")
+		{
+			tasks.GET("", handlers.ListTasks)
+			tasks.GET("/summary", handlers.TaskSummary)
+			tasks.POST("", handlers.CreateTask)
+			tasks.PATCH("/:task_id", handlers.UpdateTask)
+			tasks.DELETE("/:task_id", handlers.DeleteTask)
+		}
 		protected.POST("/chats/:user_id/calls", handlers.StartCall)
 		protected.GET("/calls/ice-servers", handlers.GetCallICEServers)
 		protected.POST("/chats/messages/:message_id/reactions", handlers.ReactToDirectMessage)

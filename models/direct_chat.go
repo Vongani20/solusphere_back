@@ -17,6 +17,7 @@ type ChatUser struct {
 	Username   string     `json:"username"`
 	Email      string     `json:"email"`
 	Role       string     `json:"role"`
+	ImageURL   string     `json:"image_url,omitempty"`
 	IsOnline   bool       `json:"is_online"`
 	LastSeenAt *time.Time `json:"last_seen_at,omitempty"`
 }
@@ -25,6 +26,7 @@ type DirectMessage struct {
 	ID               int               `json:"id"`
 	SenderID         int               `json:"sender_id"`
 	SenderUsername   string            `json:"sender_username"`
+	SenderImageURL   string            `json:"sender_image_url,omitempty"`
 	ReceiverID       int               `json:"receiver_id"`
 	ReceiverUsername string            `json:"receiver_username"`
 	Message          string            `json:"message"`
@@ -41,6 +43,7 @@ type DirectConversation struct {
 	Username          string     `json:"username"`
 	Email             string     `json:"email"`
 	Role              string     `json:"role"`
+	ImageURL          string     `json:"image_url,omitempty"`
 	IsOnline          bool       `json:"is_online"`
 	LastSeenAt        *time.Time `json:"last_seen_at,omitempty"`
 	LatestMessage     string     `json:"latest_message"`
@@ -57,7 +60,7 @@ type ChatInboxSummary struct {
 
 func directMessageSelectColumns() string {
 	return `
-		m.id, m.sender_id, sender.username, m.receiver_id, receiver.username,
+		m.id, m.sender_id, sender.username, COALESCE(sender.profile_photo_url, ''), m.receiver_id, receiver.username,
 		COALESCE(m.message, ''), m.message_type, COALESCE(m.attachment_url, ''),
 		COALESCE(m.attachment_mime, ''), m.read_at, m.created_at
 	`
@@ -71,6 +74,7 @@ func scanDirectMessage(scanner interface {
 		&message.ID,
 		&message.SenderID,
 		&message.SenderUsername,
+		&message.SenderImageURL,
 		&message.ReceiverID,
 		&message.ReceiverUsername,
 		&message.Message,
@@ -83,6 +87,7 @@ func scanDirectMessage(scanner interface {
 		return nil, err
 	}
 	presignDirectMessageAttachment(message)
+	message.SenderImageURL = ProfilePhotoForClient(message.SenderImageURL)
 	return message, nil
 }
 
@@ -97,7 +102,7 @@ func presignDirectMessageAttachment(message *DirectMessage) {
 
 func ListChatUsers(db *sql.DB, currentUserID int) ([]ChatUser, error) {
 	rows, err := db.Query(`
-		SELECT u.id, u.username, u.email, u.role,
+		SELECT u.id, u.username, u.email, u.role, COALESCE(u.profile_photo_url, ''),
 		       `+presenceSelectExpr("p")+`
 		FROM users u
 		LEFT JOIN user_presence p ON p.user_id = u.id
@@ -114,10 +119,11 @@ func ListChatUsers(db *sql.DB, currentUserID int) ([]ChatUser, error) {
 		var user ChatUser
 		var isOnlineRaw int
 		var lastSeen sql.NullTime
-		if err := rows.Scan(&user.ID, &user.Username, &user.Email, &user.Role, &isOnlineRaw, &lastSeen); err != nil {
+		if err := rows.Scan(&user.ID, &user.Username, &user.Email, &user.Role, &user.ImageURL, &isOnlineRaw, &lastSeen); err != nil {
 			return nil, err
 		}
 		scanPresenceFields(&user.IsOnline, &user.LastSeenAt, isOnlineRaw, lastSeen)
+		user.ImageURL = ProfilePhotoForClient(user.ImageURL)
 		users = append(users, user)
 	}
 
@@ -146,6 +152,7 @@ func CreateDirectMessage(
 	if err != nil {
 		return nil, err
 	}
+	_ = ClearTyping(db, senderID, receiverID) // the message is sent, so stop showing "typing"
 
 	return GetDirectMessageByID(db, int(id))
 }
@@ -257,6 +264,7 @@ func ListDirectConversations(db *sql.DB, currentUserID int) ([]DirectConversatio
 			FROM all_activity
 		)
 		SELECT other_user.id, other_user.username, other_user.email, other_user.role,
+		       COALESCE(other_user.profile_photo_url, ''),
 		       `+presenceSelectExpr("presence")+`,
 		       ranked.activity_preview, ranked.activity_at, ranked.activity_type,
 		       (
@@ -300,6 +308,7 @@ func ListDirectConversations(db *sql.DB, currentUserID int) ([]DirectConversatio
 			&conversation.Username,
 			&conversation.Email,
 			&conversation.Role,
+			&conversation.ImageURL,
 			&isOnlineRaw,
 			&lastSeen,
 			&conversation.LatestMessage,
@@ -311,6 +320,7 @@ func ListDirectConversations(db *sql.DB, currentUserID int) ([]DirectConversatio
 			return nil, err
 		}
 		scanPresenceFields(&conversation.IsOnline, &conversation.LastSeenAt, isOnlineRaw, lastSeen)
+		conversation.ImageURL = ProfilePhotoForClient(conversation.ImageURL)
 		conversations = append(conversations, conversation)
 	}
 

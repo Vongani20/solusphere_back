@@ -314,20 +314,32 @@ func Profile(c *gin.Context) {
 		return
 	}
 
+	// An uploaded profile photo wins; otherwise the user sees their own face-registration photo.
+	// Stored S3 URLs are private, so they are signed before being sent to the browser.
+	customPhoto, _ := models.GetProfilePhotoURL(database.DB, userID)
+
 	face, err := models.GetUserFaceByUserID(database.DB, userID)
 	if err != nil || face == nil {
+		var imageURLValue interface{}
+		if customPhoto != "" {
+			imageURLValue = models.ProfilePhotoForClient(customPhoto)
+		}
+		resp := userResponse(user, false, imageURLValue)
+		resp["has_profile_photo"] = customPhoto != ""
 		c.JSON(http.StatusOK, gin.H{
 			"face_required": true,
 			"next_step":     "POST /api/face/register",
-			"user":          userResponse(user, false, nil),
+			"user":          resp,
 		})
 		return
 	}
 
 	faceStatus := face.IsRegistered()
 	var imageURLValue interface{}
-	if faceStatus && face.ImageURL != "" {
-		imageURLValue = face.ImageURL
+	if customPhoto != "" {
+		imageURLValue = models.ProfilePhotoForClient(customPhoto)
+	} else if faceStatus && face.ImageURL != "" {
+		imageURLValue = models.ClientAccessiblePhotoURL(face.ImageURL)
 	}
 
 	nextStep := ""
@@ -335,10 +347,12 @@ func Profile(c *gin.Context) {
 		nextStep = "POST /api/face/register"
 	}
 
+	resp := userResponse(user, faceStatus, imageURLValue)
+	resp["has_profile_photo"] = customPhoto != ""
 	c.JSON(http.StatusOK, gin.H{
 		"face_required": !faceStatus,
 		"next_step":     nextStep,
-		"user":          userResponse(user, faceStatus, imageURLValue),
+		"user":          resp,
 	})
 }
 

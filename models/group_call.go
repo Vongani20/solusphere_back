@@ -45,6 +45,7 @@ type GroupCallParticipant struct {
 	Status    string     `json:"status"`
 	InvitedAt time.Time  `json:"invited_at"`
 	JoinedAt  *time.Time `json:"joined_at,omitempty"`
+	ImageURL  string     `json:"image_url,omitempty"`
 }
 
 type GroupCall struct {
@@ -167,7 +168,7 @@ func GetGroupCall(db *sql.DB, callID string) (*GroupCall, error) {
 	}
 
 	rows, err := db.Query(`
-		SELECT p.user_id, u.username, p.status, p.invited_at, p.joined_at
+		SELECT p.user_id, u.username, p.status, p.invited_at, p.joined_at, COALESCE(u.profile_photo_url, '')
 		FROM group_call_participants p INNER JOIN users u ON u.id = p.user_id
 		WHERE p.call_id = ?
 		ORDER BY p.joined_at IS NULL, p.joined_at, u.username`, callID)
@@ -177,9 +178,10 @@ func GetGroupCall(db *sql.DB, callID string) (*GroupCall, error) {
 	defer rows.Close()
 	for rows.Next() {
 		var p GroupCallParticipant
-		if err := rows.Scan(&p.UserID, &p.Username, &p.Status, &p.InvitedAt, &p.JoinedAt); err != nil {
+		if err := rows.Scan(&p.UserID, &p.Username, &p.Status, &p.InvitedAt, &p.JoinedAt, &p.ImageURL); err != nil {
 			return nil, err
 		}
+		p.ImageURL = ProfilePhotoForClient(p.ImageURL)
 		call.Participants = append(call.Participants, p)
 	}
 	return call, rows.Err()

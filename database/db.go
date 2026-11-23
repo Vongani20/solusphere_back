@@ -46,6 +46,9 @@ func InitDBWithPort(dbUser, dbPassword, dbHost, dbPort, dbName string) {
 	if err != nil {
 		log.Fatal(" Failed to connect to database:", err)
 	}
+	// Migrations get their own connection that allows multi-statement files.
+	// The app connection keeps multi-statements off (safer for normal queries).
+	migrationDSN = dsn + "&multiStatements=true"
 
 	// Set connection pool settings
 	DB.SetMaxOpenConns(25)

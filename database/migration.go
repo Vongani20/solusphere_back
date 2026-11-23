@@ -12,8 +12,28 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 )
 
-// RunMigrations executes database migrations using SQL files
+// migrationDSN is set by InitDBWithPort; it enables multiStatements for migration files.
+var migrationDSN string
+
+// RunMigrations executes database migrations using SQL files.
+//
+// It uses a dedicated connection (multiStatements=true) because migration files hold
+// several statements, and because closing the migrator closes its connection: sharing
+// the app's DB here used to fail multi-statement files (leaving the version dirty)
+// and close the app's main connection.
 func RunMigrations(db *sql.DB) error {
+	if migrationDSN != "" {
+		own, err := sql.Open("mysql", migrationDSN)
+		if err != nil {
+			return fmt.Errorf("could not open migration connection: %v", err)
+		}
+		if err := own.Ping(); err != nil {
+			own.Close()
+			return fmt.Errorf("could not reach database for migrations: %v", err)
+		}
+		db = own // closed by m.Close() below; the app's DB stays open
+	}
+
 	// Ensure migrations directory exists
 	if err := ensureMigrationsDirectory(); err != nil {
 		log.Printf(" Could not create migrations directory: %v", err)

@@ -10,6 +10,8 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+const userSelectColumns = `id, username, email, COALESCE(phone_number, ''), password, COALESCE(auth_provider, 'local'), role, birth_date, created_at`
+
 type User struct {
 	ID           int       `json:"id"`
 	Username     string    `json:"username"`
@@ -18,6 +20,7 @@ type User struct {
 	Password     string    `json:"-"`
 	AuthProvider string    `json:"auth_provider"`
 	Role         string    `json:"role"`
+	BirthDate    string    `json:"birth_date,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 }
 
@@ -30,6 +33,7 @@ type RegisterRequest struct {
 	Username    string `json:"username" binding:"required"`
 	Email       string `json:"email" binding:"required,email"`
 	PhoneNumber string `json:"phone_number"`
+	BirthDate   string `json:"birth_date" binding:"required"`
 	Password    string `json:"password" binding:"required,min=6"`
 }
 
@@ -46,30 +50,35 @@ func (u *User) CheckPassword(password string) error {
 	return bcrypt.CompareHashAndPassword([]byte(u.Password), []byte(password))
 }
 
-func GetUserByUsername(db *sql.DB, username string) (*User, error) {
-	query := "SELECT id, username, email, COALESCE(phone_number, ''), password, COALESCE(auth_provider, 'local'), role, created_at FROM users WHERE username = ?"
-	row := db.QueryRow(query, username)
-
+func scanUser(row interface{ Scan(...any) error }) (*User, error) {
+	var birth sql.NullTime
 	user := &User{}
-	err := row.Scan(&user.ID, &user.Username, &user.Email, &user.PhoneNumber, &user.Password, &user.AuthProvider, &user.Role, &user.CreatedAt)
+	err := row.Scan(
+		&user.ID,
+		&user.Username,
+		&user.Email,
+		&user.PhoneNumber,
+		&user.Password,
+		&user.AuthProvider,
+		&user.Role,
+		&birth,
+		&user.CreatedAt,
+	)
 	if err != nil {
 		return nil, err
 	}
-
+	if birth.Valid {
+		user.BirthDate = birth.Time.Format("2006-01-02")
+	}
 	return user, nil
 }
 
+func GetUserByUsername(db *sql.DB, username string) (*User, error) {
+	return scanUser(db.QueryRow("SELECT "+userSelectColumns+" FROM users WHERE username = ?", username))
+}
+
 func GetUserByEmail(db *sql.DB, email string) (*User, error) {
-	query := "SELECT id, username, email, COALESCE(phone_number, ''), password, COALESCE(auth_provider, 'local'), role, created_at FROM users WHERE email = ?"
-	row := db.QueryRow(query, email)
-
-	user := &User{}
-	err := row.Scan(&user.ID, &user.Username, &user.Email, &user.PhoneNumber, &user.Password, &user.AuthProvider, &user.Role, &user.CreatedAt)
-	if err != nil {
-		return nil, err
-	}
-
-	return user, nil
+	return scanUser(db.QueryRow("SELECT "+userSelectColumns+" FROM users WHERE email = ?", email))
 }
 
 func CreateUser(db *sql.DB, user *User) error {
@@ -90,10 +99,14 @@ func CreateUser(db *sql.DB, user *User) error {
 		user.AuthProvider = "local"
 	}
 
-	query := "INSERT INTO users (username, email, phone_number, password, auth_provider) VALUES (?, ?, ?, ?, ?)"
+	query := "INSERT INTO users (username, email, phone_number, password, auth_provider, birth_date) VALUES (?, ?, ?, ?, ?, ?)"
 	log.Printf("Executing query: %s", query)
 
-	result, err := db.Exec(query, user.Username, user.Email, user.PhoneNumber, user.Password, user.AuthProvider)
+	var birthDate interface{}
+	if strings.TrimSpace(user.BirthDate) != "" {
+		birthDate = user.BirthDate
+	}
+	result, err := db.Exec(query, user.Username, user.Email, user.PhoneNumber, user.Password, user.AuthProvider, birthDate)
 	if err != nil {
 		log.Printf("CreateUser: Exec error: %v", err)
 		return err
@@ -121,7 +134,7 @@ func UpdateUserPassword(db *sql.DB, userID int, newPassword string) error {
 
 func ListUsers(db *sql.DB) ([]User, error) {
 	rows, err := db.Query(`
-		SELECT id, username, email, COALESCE(phone_number, ''), password, COALESCE(auth_provider, 'local'), role, created_at
+		SELECT ` + userSelectColumns + `
 		FROM users
 		ORDER BY created_at DESC, id DESC
 	`)
@@ -132,13 +145,24 @@ func ListUsers(db *sql.DB) ([]User, error) {
 
 	users := make([]User, 0)
 	for rows.Next() {
-		var user User
-		if err := rows.Scan(&user.ID, &user.Username, &user.Email, &user.PhoneNumber, &user.Password, &user.AuthProvider, &user.Role, &user.CreatedAt); err != nil {
+		user, err := scanUser(rows)
+		if err != nil {
 			return nil, err
 		}
-		users = append(users, user)
+		users = append(users, *user)
 	}
 	return users, rows.Err()
+}
+
+func SetUserBirthDate(db *sql.DB, userID int, birthDate string) (*User, error) {
+	parsed, err := ParseBirthDate(birthDate)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec(`UPDATE users SET birth_date = ? WHERE id = ?`, parsed.Format("2006-01-02"), userID); err != nil {
+		return nil, err
+	}
+	return GetUserByID(db, userID)
 }
 
 func UpdateUserProfile(db *sql.DB, userID int, username, email, phoneNumber, role string) (*User, error) {

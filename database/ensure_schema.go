@@ -20,6 +20,7 @@ func EnsureChatAndCallSchema(db *sql.DB) error {
 		{name: "call sessions", fn: ensureCallSessionTables},
 		{name: "user presence", fn: ensureUserPresenceTable},
 		{name: "rfp documents", fn: ensureRFPDocumentsTable},
+		{name: "user birth dates", fn: ensureUserBirthDateColumn},
 	}
 
 	for _, step := range steps {
@@ -143,6 +144,14 @@ func ensureRFPDocumentsTable(db *sql.DB) error {
 			INDEX idx_rfp_documents_user_created (user_id, created_at)
 		)
 	`)
+	return err
+}
+
+func ensureUserBirthDateColumn(db *sql.DB) error {
+	if !tableExists(db, "users") || columnExists(db, "users", "birth_date") {
+		return nil
+	}
+	_, err := db.Exec(`ALTER TABLE users ADD COLUMN birth_date DATE NULL AFTER role`)
 	return err
 }
 

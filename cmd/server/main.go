@@ -445,6 +445,8 @@ func main() {
 	{
 		// User routes
 		protected.GET("/profile", handlers.Profile)
+		protected.PATCH("/profile/birth-date", handlers.UpdateBirthDate)
+		protected.GET("/birthdays", handlers.ListBirthdays)
 		protected.PATCH("/auth/password", handlers.UpdatePassword)
 		protected.GET("/users", handlers.ListChatUsers)
 		protected.POST("/presence/heartbeat", handlers.TouchPresence)

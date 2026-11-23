@@ -12,10 +12,12 @@ import (
 const faceRegistrationPath = "/api/face/register"
 
 var faceRegistrationExemptPaths = map[string]struct{}{
-	"/api/profile":       {},
-	faceRegistrationPath: {},
-	"/api/face/update":   {},
-	"/api/face/delete":   {},
+	"/api/profile":            {},
+	"/api/profile/birth-date": {},
+	"/api/birthdays":          {},
+	faceRegistrationPath:      {},
+	"/api/face/update":        {},
+	"/api/face/delete":        {},
 }
 
 // RequireCompletedFaceRegistration blocks protected app endpoints until a user

@@ -12,8 +12,8 @@ import (
 	"solusphere_backend/models"
 )
 
-const rfpSystemPrompt = `You turn a source tender, bid, or RFP into a clean RFP document template.
-Use only facts that appear in the source. Do not invent dates, prices, weights, contacts, or requirements.
+const rfpSystemPrompt = `You turn a source tender, bid, or RFP into a bidder proposal that answers the proposal requirements in that source.
+Use only facts that appear in the source. Do not invent dates, prices, weights, contacts, company names, past projects, or requirements.
 Read the whole source, including specifications, returnable schedules, and annexures near the end. Do not stop after the introduction.
 If a field is not stated, use an empty string or an empty array and add a short note to gaps.
 Write in plain English. Keep each bullet to one sentence.
@@ -23,9 +23,11 @@ objectives (string[]), scope (string[]), deliverables (string[]),
 requirements ({category, items: string[]}[]), eligibility (string[]),
 evaluationCriteria ({criterion, weight}[]), timeline ({milestone, date}[]),
 submissionMethod, submissionFormat, requiredDocuments (string[]), terms (string[]), gaps (string[]),
-solution: { summary, approach (string[]), whyItFits (string[]), team (string[]), risks ({risk, response}[]) }.
-The solution is a practical idea a bidder could use. Base it on the scope, deliverables, requirements, and evaluation criteria.
-Do not invent a company name, price, past project, or date that the source does not state.`
+solution: { summary, approach (string[]), whyItFits (string[]), team (string[]), risks ({risk, response}[]), responses ({requirement, response}[]) }.
+solution.responses is the proposal. Add one response for every distinct proposal, functional, technical, or mandatory requirement in the source.
+Each response must say how the proposal will meet that requirement. Do not repeat the requirement text as the response.
+If the source lists no explicit requirements, build responses from the scope and deliverables.
+Base the rest of the solution on the scope, deliverables, requirements, and evaluation criteria.`
 
 const (
 	rfpSinglePassRunes = 350000
@@ -79,10 +81,30 @@ func shortError(err error) string {
 
 func withRFPSolution(t models.RFPTemplate) models.RFPTemplate {
 	t = models.NormalizeRFPTemplate(t)
+	draft := BuildRFPSolutionIdea(t)
 	if t.Solution.Summary == "" && len(t.Solution.Approach) == 0 {
-		t.Solution = BuildRFPSolutionIdea(t)
+		t.Solution.Summary = draft.Summary
+		t.Solution.Approach = draft.Approach
+		t.Solution.WhyItFits = draft.WhyItFits
+		t.Solution.Team = draft.Team
+		if len(t.Solution.Risks) == 0 {
+			t.Solution.Risks = draft.Risks
+		}
 	}
-	return t
+	if len(t.Solution.Responses) == 0 {
+		t.Solution.Responses = draft.Responses
+	} else {
+		seen := map[string]bool{}
+		for _, item := range t.Solution.Responses {
+			seen[strings.ToLower(item.Requirement)] = true
+		}
+		for _, item := range draft.Responses {
+			if !seen[strings.ToLower(item.Requirement)] {
+				t.Solution.Responses = append(t.Solution.Responses, item)
+			}
+		}
+	}
+	return models.NormalizeRFPTemplate(t)
 }
 
 func callRFPModel(ctx context.Context, filename, text, partNote string) (models.RFPTemplate, error) {
@@ -245,7 +267,7 @@ func mergeRFPTemplates(parts []models.RFPTemplate) models.RFPTemplate {
 	}
 
 	groupIndex := map[string]int{}
-	seenCrit, seenTime, seenRisk := map[string]bool{}, map[string]bool{}, map[string]bool{}
+	seenCrit, seenTime, seenRisk, seenResp := map[string]bool{}, map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for _, p := range parts {
 		for _, g := range p.Requirements {
 			key := strings.ToLower(g.Category)
@@ -276,6 +298,14 @@ func mergeRFPTemplates(parts []models.RFPTemplate) models.RFPTemplate {
 				seenRisk[key] = true
 				m.Solution.Risks = append(m.Solution.Risks, r)
 			}
+		}
+		for _, r := range p.Solution.Responses {
+			key := strings.ToLower(r.Requirement)
+			if key == "" || seenResp[key] {
+				continue
+			}
+			seenResp[key] = true
+			m.Solution.Responses = append(m.Solution.Responses, r)
 		}
 	}
 	m.Solution.Summary = pick(func(t models.RFPTemplate) string { return t.Solution.Summary })
@@ -310,6 +340,22 @@ func BuildRFPSolutionIdea(t models.RFPTemplate) models.RFPSolution {
 		s.WhyItFits = append(s.WhyItFits, line+".")
 	}
 	s.Team = []string{"Name a lead, the people who do the work, and a support contact for the contract period."}
+	for _, group := range t.Requirements {
+		for _, item := range group.Items {
+			s.Responses = append(s.Responses, models.RFPProposalResponse{
+				Requirement: item,
+				Response:    proposalAnswer(group.Category, item),
+			})
+		}
+	}
+	if len(s.Responses) == 0 {
+		for _, item := range t.Scope {
+			s.Responses = append(s.Responses, models.RFPProposalResponse{
+				Requirement: item,
+				Response:    "The proposal includes this scope item as a committed outcome, with the method, evidence, and owner stated in the technical approach.",
+			})
+		}
+	}
 	for i, gap := range t.Gaps {
 		if i >= 5 {
 			break
@@ -317,6 +363,17 @@ func BuildRFPSolutionIdea(t models.RFPTemplate) models.RFPSolution {
 		s.Risks = append(s.Risks, models.RFPRisk{Risk: gap, Response: "Confirm this point with the issuer before the bid is submitted."})
 	}
 	return s
+}
+
+func proposalAnswer(category, requirement string) string {
+	answer := "The proposal meets this requirement and will describe the method, the evidence to be submitted, and who is responsible for it."
+	if category != "" {
+		answer += " It is covered under " + category + "."
+	}
+	if requirement != "" {
+		answer += " Requirement: " + requirement
+	}
+	return answer
 }
 
 func lowerFirst(v string) string {

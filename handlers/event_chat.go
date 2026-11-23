@@ -31,6 +31,7 @@ type updateUserRequest struct {
 	Username    *string `json:"username"`
 	Email       *string `json:"email"`
 	PhoneNumber *string `json:"phone_number"`
+	BirthDate   *string `json:"birth_date"`
 	Role        *string `json:"role"`
 	Password    *string `json:"password"`
 }
@@ -39,6 +40,7 @@ type adminCreateUserRequest struct {
 	Username    string `json:"username" binding:"required"`
 	Email       string `json:"email" binding:"required,email"`
 	PhoneNumber string `json:"phone_number"`
+	BirthDate   string `json:"birth_date" binding:"required"`
 	Password    string `json:"password" binding:"required,min=6"`
 	Role        string `json:"role"`
 }
@@ -417,6 +419,16 @@ func UpdateUserByAdmin(c *gin.Context) {
 			return
 		}
 	}
+	if req.BirthDate != nil {
+		updated, err := models.SetUserBirthDate(database.DB, targetUserID, *req.BirthDate)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		if updated != nil {
+			user = updated
+		}
+	}
 	c.JSON(http.StatusOK, gin.H{"message": "User updated", "user": adminUserResponse(user)})
 }
 
@@ -485,6 +497,11 @@ func CreateUserByAdmin(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "role must be user or admin"})
 		return
 	}
+	birthDate, err := models.ParseBirthDate(req.BirthDate)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	if _, err := models.GetUserByEmail(database.DB, email); err == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Email already exists"})
@@ -499,6 +516,7 @@ func CreateUserByAdmin(c *gin.Context) {
 		Username:     username,
 		Email:        email,
 		PhoneNumber:  phoneNumber,
+		BirthDate:    birthDate.Format("2006-01-02"),
 		Password:     req.Password,
 		AuthProvider: "local",
 		Role:         role,
@@ -519,7 +537,7 @@ func CreateUserByAdmin(c *gin.Context) {
 		newUser.Role = role
 	}
 
-	_, err := database.DB.Exec(
+	_, err = database.DB.Exec(
 		"INSERT INTO user_faces (user_id, image_url, status) VALUES (?, ?, ?)",
 		newUser.ID, "", false,
 	)
@@ -664,6 +682,7 @@ func adminUserResponse(user *models.User) gin.H {
 		"phone_number":  user.PhoneNumber,
 		"auth_provider": user.AuthProvider,
 		"role":          user.Role,
+		"birth_date":    user.BirthDate,
 		"created_at":    user.CreatedAt,
 	}
 }

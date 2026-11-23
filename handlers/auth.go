@@ -65,6 +65,11 @@ func registerWithProvider(c *gin.Context, provider, successMessage string) {
 	req.Email = strings.TrimSpace(strings.ToLower(req.Email))
 	req.Username = strings.TrimSpace(req.Username)
 	req.PhoneNumber = strings.TrimSpace(req.PhoneNumber)
+	birthDate, err := models.ParseBirthDate(req.BirthDate)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
 
 	if _, err := models.GetUserByEmail(database.DB, req.Email); err == nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Email already exists"})
@@ -80,6 +85,7 @@ func registerWithProvider(c *gin.Context, provider, successMessage string) {
 		Username:     req.Username,
 		Email:        req.Email,
 		PhoneNumber:  req.PhoneNumber,
+		BirthDate:    birthDate.Format("2006-01-02"),
 		Password:     req.Password,
 		AuthProvider: provider,
 		Role:         "user",
@@ -97,7 +103,7 @@ func registerWithProvider(c *gin.Context, provider, successMessage string) {
 		return
 	}
 
-	_, err := database.DB.Exec(
+	_, err = database.DB.Exec(
 		"INSERT INTO user_faces (user_id, image_url, status) VALUES (?, ?, ?)",
 		user.ID, "", false,
 	)
@@ -396,6 +402,7 @@ func userResponse(user *models.User, faceStatus bool, imageURL interface{}) gin.
 		"phone_number":  user.PhoneNumber,
 		"auth_provider": user.AuthProvider,
 		"role":          user.Role,
+		"birth_date":    user.BirthDate,
 		"face_status":   faceStatus,
 		"image_url":     imageURL,
 	}

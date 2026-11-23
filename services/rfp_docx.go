@@ -74,8 +74,8 @@ func RenderRFPDocx(d *models.RFPDocument) ([]byte, error) {
 	t := d.Template
 	w := rfpDocWriter{doc: docx.New().WithDefaultTheme().WithA4Page()}
 
-	w.text("SoluGrowth · SoluSphere RFP template", true, false, rfpBrand, "18")
-	w.text("REQUEST FOR PROPOSAL", true, false, rfpGreen, "20")
+	w.text("SoluGrowth · SoluSphere", true, false, rfpBrand, "18")
+	w.text("PROPOSAL", true, false, rfpGreen, "20")
 	title := t.Title
 	if title == "" {
 		title = "Untitled RFP"
@@ -107,7 +107,25 @@ func RenderRFPDocx(d *models.RFPDocument) ([]byte, error) {
 		{"Source files", sourceLabel},
 	})
 
-	w.heading("Solution idea")
+	w.heading("Proposal")
+	w.hint("Each answer follows a proposal requirement from the source tender.")
+	if len(t.Solution.Responses) == 0 {
+		w.hint("Add a response for each proposal requirement.")
+	}
+	for _, item := range t.Solution.Responses {
+		req := item.Requirement
+		if req == "" {
+			req = "Requirement"
+		}
+		w.label(req)
+		if item.Response != "" {
+			w.body(item.Response)
+		} else {
+			w.hint("Add how the proposal meets this requirement.")
+		}
+	}
+
+	w.heading("How the proposal is delivered")
 	if t.Solution.Summary != "" {
 		w.body(t.Solution.Summary)
 	} else {

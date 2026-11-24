@@ -26,6 +26,8 @@ func EnsureChatAndCallSchema(db *sql.DB) error {
 		{name: "chat reactions and group calls", fn: ensureChatReactionsAndGroupCallTables},
 		{name: "user birth dates", fn: ensureUserBirthDateColumn},
 		{name: "typing, profile photos and tasks", fn: ensureTypingPhotosAndTasks},
+		{name: "meetings", fn: ensureMeetings},
+		{name: "helpdesk attachments", fn: ensureHelpdeskAttachments},
 	}
 
 	for _, step := range steps {
@@ -334,6 +336,53 @@ func ensureTypingPhotosAndTasks(db *sql.DB) error {
 			INDEX idx_tasks_assigned_status (assigned_to, status),
 			INDEX idx_tasks_created_by (created_by, status)
 		) DEFAULT CHARSET = utf8mb4`)
+	return err
+}
+
+func ensureMeetings(db *sql.DB) error {
+	if _, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS meetings (
+			id INT AUTO_INCREMENT PRIMARY KEY,
+			host_id INT NOT NULL,
+			title VARCHAR(200) NOT NULL,
+			starts_at DATETIME NOT NULL,
+			ends_at DATETIME NULL,
+			notes MEDIUMTEXT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+			FOREIGN KEY (host_id) REFERENCES users(id) ON DELETE CASCADE,
+			INDEX idx_meetings_starts (starts_at)
+		) DEFAULT CHARSET = utf8mb4`); err != nil {
+		return err
+	}
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS meeting_participants (
+			meeting_id INT NOT NULL,
+			user_id INT NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			PRIMARY KEY (meeting_id, user_id),
+			FOREIGN KEY (meeting_id) REFERENCES meetings(id) ON DELETE CASCADE,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		)`)
+	return err
+}
+
+func ensureHelpdeskAttachments(db *sql.DB) error {
+	if !tableExists(db, "help_desk_tickets") {
+		return nil
+	}
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS help_desk_attachments (
+			id INT AUTO_INCREMENT PRIMARY KEY,
+			ticket_id INT NOT NULL,
+			file_name VARCHAR(255) NOT NULL,
+			content_type VARCHAR(100) NOT NULL,
+			size_bytes INT NOT NULL,
+			storage_url TEXT NOT NULL,
+			created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+			FOREIGN KEY (ticket_id) REFERENCES help_desk_tickets(id) ON DELETE CASCADE,
+			INDEX idx_help_desk_attachments_ticket (ticket_id)
+		)`)
 	return err
 }
 

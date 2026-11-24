@@ -19,16 +19,17 @@ const (
 )
 
 type HelpDeskTicket struct {
-	ID          int       `json:"id"`
-	UserID      int       `json:"user_id"`
-	Subject     string    `json:"subject"`
-	Description string    `json:"description"`
-	AIAnalysis  string    `json:"aiAnalysis"`
-	AISolution  string    `json:"aiSolution"`
-	AIApproach  string    `json:"aiApproach"`
-	Status      string    `json:"status"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID          int                  `json:"id"`
+	UserID      int                  `json:"user_id"`
+	Subject     string               `json:"subject"`
+	Description string               `json:"description"`
+	AIAnalysis  string               `json:"aiAnalysis"`
+	AISolution  string               `json:"aiSolution"`
+	AIApproach  string               `json:"aiApproach"`
+	Status      string               `json:"status"`
+	Attachments []HelpDeskAttachment `json:"attachments"`
+	CreatedAt   time.Time            `json:"created_at"`
+	UpdatedAt   time.Time            `json:"updated_at"`
 }
 
 // CreateTicket inserts a new ticket with AI analysis
@@ -56,6 +57,7 @@ func CreateTicket(userID int, subject, description string) (*HelpDeskTicket, err
 		AISolution:  aiSolution,
 		AIApproach:  aiApproach,
 		Status:      HelpdeskStatusOpen,
+		Attachments: []HelpDeskAttachment{},
 		CreatedAt:   time.Now(),
 		UpdatedAt:   time.Now(),
 	}, nil
@@ -97,9 +99,16 @@ func ListHelpDeskTickets() ([]HelpDeskTicket, error) {
 		if err := rows.Scan(&ticket.ID, &ticket.UserID, &ticket.Subject, &ticket.Description, &ticket.AIAnalysis, &ticket.AISolution, &ticket.AIApproach, &ticket.Status, &ticket.CreatedAt, &ticket.UpdatedAt); err != nil {
 			return nil, err
 		}
+		ticket.Attachments = []HelpDeskAttachment{}
 		tickets = append(tickets, ticket)
 	}
-	return tickets, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := attachFiles(tickets); err != nil {
+		return nil, err
+	}
+	return tickets, nil
 }
 
 func GetHelpDeskTicketByID(ticketID int) (*HelpDeskTicket, error) {
@@ -114,6 +123,12 @@ func GetHelpDeskTicketByID(ticketID int) (*HelpDeskTicket, error) {
 	if err := row.Scan(&ticket.ID, &ticket.UserID, &ticket.Subject, &ticket.Description, &ticket.AIAnalysis, &ticket.AISolution, &ticket.AIApproach, &ticket.Status, &ticket.CreatedAt, &ticket.UpdatedAt); err != nil {
 		return nil, err
 	}
+	ticket.Attachments = []HelpDeskAttachment{}
+	batch := []HelpDeskTicket{*ticket}
+	if err := attachFiles(batch); err != nil {
+		return nil, err
+	}
+	ticket.Attachments = batch[0].Attachments
 	return ticket, nil
 }
 

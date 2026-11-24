@@ -365,6 +365,10 @@ func main() {
 			"http://localhost:5173",
 			"http://localhost:3000",
 			"http://localhost:2080",
+			"https://localhost",
+			"http://localhost",
+			"capacitor://localhost",
+			"ionic://localhost",
 			"http://3.250.102.248:2080",
 			"https://d25x8zzf939iqa.cloudfront.net",
 			"http://solusphere-frontend.s3-website-us-east-1.amazonaws.com",
@@ -469,6 +473,7 @@ func main() {
 
 		// Helpdesk routes
 		protected.POST("/helpdesk", handlers.SubmitTicketHandler)
+		protected.POST("/helpdesk/:ticket_id/attachments", handlers.AddHelpdeskAttachments)
 		protected.POST("/helpdesk-chat", handlers.HelpdeskChatHandler)
 
 		// Event chat routes
@@ -505,6 +510,15 @@ func main() {
 		protected.POST("/chats/:user_id/calls", handlers.StartCall)
 		protected.GET("/calls/ice-servers", handlers.GetCallICEServers)
 		protected.POST("/chats/messages/:message_id/reactions", handlers.ReactToDirectMessage)
+
+		meetings := protected.Group("/meetings")
+		{
+			meetings.GET("", handlers.ListMeetings)
+			meetings.POST("", handlers.CreateMeeting)
+			meetings.GET("/:meeting_id", handlers.GetMeeting)
+			meetings.POST("/:meeting_id/participants", handlers.AddMeetingParticipant)
+			meetings.PUT("/:meeting_id/notes", handlers.UpdateMeetingNotes)
+		}
 
 		// Group calls (mesh WebRTC, HTTP-polled signaling)
 		groupCalls := protected.Group("/group-calls")

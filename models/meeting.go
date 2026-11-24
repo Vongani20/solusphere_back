@@ -126,10 +126,11 @@ func nullableTime(value *time.Time) interface{} {
 
 func ListMeetings(db *sql.DB, userID int) ([]Meeting, error) {
 	rows, err := db.Query(`
-		SELECT DISTINCT m.id
+		SELECT m.id
 		FROM meetings m
 		LEFT JOIN meeting_participants p ON p.meeting_id = m.id
 		WHERE m.host_id = ? OR p.user_id = ?
+		GROUP BY m.id, m.starts_at
 		ORDER BY m.starts_at DESC
 		LIMIT 100`, userID, userID)
 	if err != nil {

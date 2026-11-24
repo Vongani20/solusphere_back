@@ -367,8 +367,6 @@ func main() {
 			"http://localhost:2080",
 			"https://localhost",
 			"http://localhost",
-			"capacitor://localhost",
-			"ionic://localhost",
 			"http://3.250.102.248:2080",
 			"https://d25x8zzf939iqa.cloudfront.net",
 			"http://solusphere-frontend.s3-website-us-east-1.amazonaws.com",

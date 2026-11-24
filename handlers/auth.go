@@ -28,12 +28,12 @@ type forgotPasswordRequest struct {
 type resetPasswordRequest struct {
 	Email       string `json:"email" binding:"required,email"`
 	Code        string `json:"code" binding:"required"`
-	NewPassword string `json:"new_password" binding:"required,min=6"`
+	NewPassword string `json:"new_password" binding:"required,min=8"`
 }
 
 type updatePasswordRequest struct {
 	CurrentPassword string `json:"current_password" binding:"required"`
-	NewPassword     string `json:"new_password" binding:"required,min=6"`
+	NewPassword     string `json:"new_password" binding:"required,min=8"`
 }
 
 func Register(c *gin.Context) {
@@ -58,7 +58,7 @@ func registerWithProvider(c *gin.Context, provider, successMessage string) {
 	var req models.RegisterRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		log.Printf("Registration JSON binding error: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Check the name, email, birth date, and use a password of at least 8 characters."})
 		return
 	}
 
@@ -99,7 +99,7 @@ func registerWithProvider(c *gin.Context, provider, successMessage string) {
 
 	if err := models.CreateUser(database.DB, user); err != nil {
 		log.Printf("Database error creating user: %v", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user", "details": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 		return
 	}
 
@@ -122,13 +122,11 @@ func registerWithProvider(c *gin.Context, provider, successMessage string) {
 func Login(c *gin.Context) {
 	var req models.LoginRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		log.Printf("Login JSON binding error: %v", err)
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Enter a valid email and password."})
 		return
 	}
 
 	email := strings.TrimSpace(strings.ToLower(req.Email))
-	log.Printf("Login attempt for email: %s", email)
 
 	user, err := models.GetUserByEmail(database.DB, email)
 	if err != nil {
@@ -190,7 +188,7 @@ func Login(c *gin.Context) {
 func ForgotPassword(c *gin.Context) {
 	var req forgotPasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Enter a valid email address."})
 		return
 	}
 
@@ -227,23 +225,21 @@ func ForgotPassword(c *gin.Context) {
 	if len(channels) == 0 {
 		log.Printf("Password reset delivery failed for user %d: %s", user.ID, strings.Join(deliveryErrors, "; "))
 		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"error":   "Password reset delivery is not configured",
-			"details": deliveryErrors,
+			"error": "Could not send the reset code. Try again shortly.",
 		})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"message":  "Password reset code sent.",
-		"channels": channels,
-		"expires":  "15 minutes",
+		"message": "If this account can receive reset messages, a code has been sent.",
+		"expires": "15 minutes",
 	})
 }
 
 func ResetPassword(c *gin.Context) {
 	var req resetPasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Enter the email, reset code, and a new password of at least 8 characters."})
 		return
 	}
 
@@ -281,7 +277,7 @@ func UpdatePassword(c *gin.Context) {
 
 	var req updatePasswordRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Enter your current password and a new password of at least 8 characters."})
 		return
 	}
 

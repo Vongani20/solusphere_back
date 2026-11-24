@@ -56,7 +56,7 @@ func SubmitTicketHandler(c *gin.Context) {
 
 	ticket, err := models.CreateTicket(userID, req.Subject, req.Description)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save the ticket"})
 		return
 	}
 	if len(files) > 0 {

@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"os"
 	"solusphere_backend/database"
@@ -357,6 +356,7 @@ func main() {
 	// Create Gin router
 	r := gin.Default()
 	r.Static("/uploads", uploadDir)
+	r.Use(middleware.SecurityHeaders())
 
 	// CORS configuration
 	r.Use(cors.New(cors.Config{
@@ -389,38 +389,27 @@ func main() {
 		log.Printf("%s %s %d %v", c.Request.Method, c.Request.URL.Path, c.Writer.Status(), duration)
 	})
 
-	// Swagger API documentation
-	r.GET("/", handlers.SwaggerRoot)
-	r.HEAD("/", handlers.SwaggerRoot)
-	r.GET("/swagger", handlers.SwaggerRoot)
-	r.HEAD("/swagger", handlers.SwaggerRoot)
-	r.GET("/swagger/", handlers.SwaggerRoot)
-	r.HEAD("/swagger/", handlers.SwaggerRoot)
-	r.GET("/swagger/index.html", handlers.SwaggerIndex)
-	r.GET("/swagger/doc.json", handlers.SwaggerSpec)
+	if gin.Mode() != gin.ReleaseMode {
+		r.GET("/", handlers.SwaggerRoot)
+		r.HEAD("/", handlers.SwaggerRoot)
+		r.GET("/swagger", handlers.SwaggerRoot)
+		r.HEAD("/swagger", handlers.SwaggerRoot)
+		r.GET("/swagger/", handlers.SwaggerRoot)
+		r.HEAD("/swagger/", handlers.SwaggerRoot)
+		r.GET("/swagger/index.html", handlers.SwaggerIndex)
+		r.GET("/swagger/doc.json", handlers.SwaggerSpec)
 
-	// Debug endpoints
-	r.GET("/debug/db", func(c *gin.Context) {
-		status := database.GetDBStatus()
-		c.JSON(200, gin.H{
-			"db_status": status,
-			"db_ptr":    fmt.Sprintf("%p", database.DB),
-			"db_is_nil": database.DB == nil,
-			"env_vars": gin.H{
-				"DB_HOST": os.Getenv("DB_HOST"),
-				"DB_USER": os.Getenv("DB_USER"),
-				"DB_NAME": os.Getenv("DB_NAME"),
-			},
+		r.GET("/debug/db", func(c *gin.Context) {
+			c.JSON(200, gin.H{"db_is_nil": database.DB == nil})
 		})
-	})
-
-	r.GET("/debug/ping", func(c *gin.Context) {
-		if err := database.DB.Ping(); err != nil {
-			c.JSON(500, gin.H{"error": err.Error()})
-			return
-		}
-		c.JSON(200, gin.H{"message": "pong"})
-	})
+		r.GET("/debug/ping", func(c *gin.Context) {
+			if err := database.DB.Ping(); err != nil {
+				c.JSON(500, gin.H{"error": "database unavailable"})
+				return
+			}
+			c.JSON(200, gin.H{"message": "pong"})
+		})
+	}
 
 	// ============================================
 	// ROUTES REGISTRATION
@@ -428,12 +417,14 @@ func main() {
 
 	// Public routes - Authentication (no auth required)
 	public := r.Group("/api/auth")
+	accountLimit := middleware.LimitJSONField("email", 8, 15*time.Minute)
+	resetRequestLimit := middleware.LimitJSONField("email", 5, time.Hour)
 	{
-		public.POST("/register", handlers.Register)
-		public.POST("/outlook365/signup", handlers.Outlook365Signup)
-		public.POST("/login", handlers.Login)
-		public.POST("/forgot-password", handlers.ForgotPassword)
-		public.POST("/reset-password", handlers.ResetPassword)
+		public.POST("/register", resetRequestLimit, handlers.Register)
+		public.POST("/outlook365/signup", resetRequestLimit, handlers.Outlook365Signup)
+		public.POST("/login", accountLimit, handlers.Login)
+		public.POST("/forgot-password", resetRequestLimit, handlers.ForgotPassword)
+		public.POST("/reset-password", accountLimit, handlers.ResetPassword)
 		public.POST("/face-login", handlers.FaceLogin(rekogSvc))
 		public.POST("/scan-login", handlers.FaceLogin(rekogSvc))
 	}
@@ -618,36 +609,12 @@ func main() {
 	r.GET("/health", func(c *gin.Context) {
 		dbStatus := "healthy"
 		if err := database.DB.Ping(); err != nil {
-			dbStatus = "unhealthy: " + err.Error()
+			log.Printf("health check database ping failed: %v", err)
+			dbStatus = "unhealthy"
 		}
-
-		awsStatus := "not_configured"
-		if appSecrets.AWSRegion != "" && appSecrets.AWSBucketName != "" {
-			awsStatus = "configured"
-		}
-		turnStatus := "not_configured"
-		if os.Getenv("TURN_URLS") != "" && (os.Getenv("TURN_SECRET") != "" || os.Getenv("TURN_CREDENTIAL") != "") {
-			turnStatus = "configured"
-		}
-		openAIStatus := "not_configured"
-		if services.IsOpenAIInitialized() {
-			openAIStatus = "configured"
-		}
-
 		c.JSON(200, gin.H{
-			"message":        "Server is running",
-			"timestamp":      time.Now().Format(time.RFC3339),
-			"database":       dbStatus,
-			"database_type":  "MySQL",
-			"database_host":  appSecrets.DBHost,
-			"database_name":  appSecrets.DBName,
-			"aws_status":     awsStatus,
-			"openai_status":  openAIStatus,
-			"turn_status":    turnStatus,
-			"openai_model":   services.GetOpenAIModel(),
-			"secrets_source": getSecretsSource(useAWSSecrets, useSecretsAgent),
-			"secret_name":    os.Getenv("AWS_SECRET_NAME"),
-			"port":           2080,
+			"message":  "Server is running",
+			"database": dbStatus,
 		})
 	})
 

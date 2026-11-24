@@ -1655,7 +1655,7 @@ const openAPISpecJSON = `{
           "username": { "type": "string" },
           "email": { "type": "string", "format": "email" },
           "phone_number": { "type": "string", "description": "E.164 format is recommended for AWS SNS SMS delivery." },
-          "password": { "type": "string", "minLength": 6 }
+          "password": { "type": "string", "minLength": 8 }
         }
       },
       "LoginRequest": {
@@ -1679,7 +1679,7 @@ const openAPISpecJSON = `{
         "properties": {
           "email": { "type": "string", "format": "email" },
           "code": { "type": "string", "minLength": 4 },
-          "new_password": { "type": "string", "minLength": 6 }
+          "new_password": { "type": "string", "minLength": 8 }
         }
       },
       "UpdatePasswordRequest": {
@@ -1687,7 +1687,7 @@ const openAPISpecJSON = `{
         "required": ["current_password", "new_password"],
         "properties": {
           "current_password": { "type": "string" },
-          "new_password": { "type": "string", "minLength": 6 }
+          "new_password": { "type": "string", "minLength": 8 }
         }
       },
       "LoginResponse": {
@@ -1760,7 +1760,7 @@ const openAPISpecJSON = `{
           "username": { "type": "string" },
           "email": { "type": "string", "format": "email" },
           "phone_number": { "type": "string" },
-          "password": { "type": "string", "minLength": 6 },
+          "password": { "type": "string", "minLength": 8 },
           "role": { "type": "string", "enum": ["user", "admin"], "default": "user" }
         }
       },
@@ -1770,7 +1770,7 @@ const openAPISpecJSON = `{
           "username": { "type": "string" },
           "email": { "type": "string", "format": "email" },
           "phone_number": { "type": "string" },
-          "password": { "type": "string", "minLength": 6 },
+          "password": { "type": "string", "minLength": 8 },
           "role": { "type": "string", "enum": ["user", "admin"] }
         }
       },

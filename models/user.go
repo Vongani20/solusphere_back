@@ -35,7 +35,7 @@ type RegisterRequest struct {
 	Email       string `json:"email" binding:"required,email"`
 	PhoneNumber string `json:"phone_number"`
 	BirthDate   string `json:"birth_date" binding:"required"`
-	Password    string `json:"password" binding:"required,min=6"`
+	Password    string `json:"password" binding:"required,min=8"`
 }
 
 func (u *User) HashPassword() error {

@@ -124,7 +124,6 @@ func AuthMiddleware() gin.HandlerFunc {
 			c.JSON(http.StatusUnauthorized, gin.H{
 				"error": "Invalid or expired token",
 				"code":  "INVALID_TOKEN",
-				"details": err.Error(),
 			})
 			c.Abort()
 			return
@@ -134,7 +133,7 @@ func AuthMiddleware() gin.HandlerFunc {
 		c.Set("userID", claims.UserID)
 		c.Set("username", claims.Username)
 		c.Set("token_expires_at", claims.ExpiresAt)
-		
+
 		// Optional: Add token expiration warning if token is about to expire
 		if claims.ExpiresAt > 0 {
 			expiryTime := time.Unix(claims.ExpiresAt, 0)
@@ -143,7 +142,7 @@ func AuthMiddleware() gin.HandlerFunc {
 				c.Header("X-Token-Expires-In", timeLeft.String())
 			}
 		}
-		
+
 		c.Next()
 	}
 }
@@ -151,7 +150,7 @@ func AuthMiddleware() gin.HandlerFunc {
 // validateTokenWithSecret validates a JWT token with given secret
 func validateTokenWithSecret(tokenString string, secret []byte) (*Claims, error) {
 	claims := &Claims{}
-	
+
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
 		// Validate signing method
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
@@ -193,9 +192,9 @@ func ValidateTokenWithContext(c *gin.Context) (*Claims, error) {
 	if !exists {
 		return nil, fmt.Errorf("user not authenticated")
 	}
-	
+
 	username, _ := c.Get("username")
-	
+
 	return &Claims{
 		UserID:   userID.(int),
 		Username: username.(string),
@@ -208,12 +207,12 @@ func GetUserIDFromContext(c *gin.Context) (int, error) {
 	if !exists {
 		return 0, fmt.Errorf("user ID not found in context")
 	}
-	
+
 	id, ok := userID.(int)
 	if !ok {
 		return 0, fmt.Errorf("user ID has invalid type")
 	}
-	
+
 	return id, nil
 }
 
@@ -223,12 +222,12 @@ func GetUsernameFromContext(c *gin.Context) (string, error) {
 	if !exists {
 		return "", fmt.Errorf("username not found in context")
 	}
-	
+
 	name, ok := username.(string)
 	if !ok {
 		return "", fmt.Errorf("username has invalid type")
 	}
-	
+
 	return name, nil
 }
 
@@ -237,11 +236,11 @@ func GetUsernameFromContext(c *gin.Context) (string, error) {
 func OptionalAuthMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		InitJWTSecret()
-		
+
 		authHeader := c.GetHeader("Authorization")
 		if authHeader != "" && strings.HasPrefix(authHeader, "Bearer ") {
 			tokenString := strings.TrimPrefix(authHeader, "Bearer ")
-			
+
 			claims, err := validateTokenWithSecret(tokenString, jwtSecret)
 			if err == nil && claims != nil {
 				c.Set("userID", claims.UserID)
@@ -249,7 +248,7 @@ func OptionalAuthMiddleware() gin.HandlerFunc {
 				c.Set("authenticated", true)
 			}
 		}
-		
+
 		c.Next()
 	}
 }
